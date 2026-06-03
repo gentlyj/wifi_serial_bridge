@@ -1,0 +1,6 @@
+dependencies:
+  espressif/esp32_io_expander: ^1.0.0
+  m5stack/m5pm1: ^1.0.7
+  m5stack/m5unified: ^0.2.17
+  lvgl/lvgl: "~9.1"
+  espressif/esp_lvgl_port: "~2.3"
