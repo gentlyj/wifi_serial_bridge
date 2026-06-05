@@ -1,6 +1,12 @@
-idf_component_register(SRCS "hello_world_main.cpp"
+idf_component_register(SRCS "main.cpp"
                              "sticks3_power.cpp"
                              "sticks3_display.c"
                              "sticks3_button.c"
                              "sticks3_audio.cpp"
+                             "sticks3_nvs.c"
+                             "sticks3_wifi.c"
+                             "sticks3_provision.c"
+                             "sticks3_tcp_server.c"
+                             "sticks3_uart_bridge.c"
+                             "sticks3_ui.c"
                        INCLUDE_DIRS ".")

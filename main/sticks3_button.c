@@ -9,12 +9,11 @@ static const char *TAG = "sticks3_button";
 #define BTN_B_PIN  12
 #define BTN_COUNT  2
 
-// Button point coordinates - must land inside the corresponding LVGL object areas
-// BtnA area: x=5~130, y=50~125 → center (67, 87)
-// BtnB area: x=5~130, y=145~220 → center (67, 182)
+// BtnA: front strip at bottom of screen → LVGL point at bottom
+// BtnB: side button → no screen area needed, point off-screen
 static const lv_point_t btn_points[BTN_COUNT] = {
-    {67, 87},   // BtnA
-    {67, 182},  // BtnB
+    {67, 225},   // BtnA — front button, bottom of screen
+    {200, 225},  // BtnB — side button, off visible area
 };
 
 static lv_indev_t *btn_indev = NULL;
@@ -24,7 +23,7 @@ static void button_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     bool btn_b = !gpio_get_level(BTN_B_PIN);
 
     if (btn_a) {
-        data->btn_id = 0;  // index into btn_points
+        data->btn_id = 0;
         data->state = LV_INDEV_STATE_PRESSED;
     } else if (btn_b) {
         data->btn_id = 1;
@@ -59,6 +58,7 @@ esp_err_t sticks3_button_init(void) {
     lv_indev_set_read_cb(btn_indev, button_read_cb);
     lv_indev_set_button_points(btn_indev, btn_points);
 
-    ESP_LOGI(TAG, "Buttons initialized: GPIO%d (BtnA), GPIO%d (BtnB)", BTN_A_PIN, BTN_B_PIN);
+    ESP_LOGI(TAG, "Buttons initialized: GPIO%d (BtnA/front), GPIO%d (BtnB/side)",
+             BTN_A_PIN, BTN_B_PIN);
     return ESP_OK;
 }

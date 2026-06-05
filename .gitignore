@@ -1,7 +1,27 @@
+﻿# Build
 build/
-.cache/
-.vscode/
+
+# ESP-IDF managed components (auto-downloaded)
+managed_components/
+
+# SDK config (user-specific, generated)
 sdkconfig
 sdkconfig.old
-managed_components/
-dependencies.lock
+sdkconfig.ci
+
+# IDE / editor
+.clangd/
+.cache/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+pytest_*.py
+
+# OS
+.DS_Store
+Thumbs.db

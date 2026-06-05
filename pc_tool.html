@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>StickS3 Serial Bridge</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    background: #1a1a2e; color: #eee;
+    height: 100vh; height: 100dvh;
+    display: flex; flex-direction: column;
+}
+.header {
+    background: #16213e; padding: 10px 16px; display: flex;
+    align-items: center; gap: 12px; flex-shrink: 0;
+    border-bottom: 1px solid #0f3460;
+}
+.header h1 { font-size: 16px; color: #e94560; white-space: nowrap; }
+.status {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; background: #666; margin-right: 4px;
+    flex-shrink: 0;
+}
+.status.connected { background: #0f0; }
+.status.connecting { background: #ff0; animation: blink 0.5s infinite; }
+@keyframes blink { 50% { opacity: 0.3; } }
+
+.conn-bar {
+    background: #16213e; padding: 8px 16px; display: flex;
+    align-items: center; gap: 8px; flex-shrink: 0;
+    border-bottom: 1px solid #0f3460;
+}
+.conn-bar label { font-size: 13px; color: #aaa; flex-shrink: 0; }
+.conn-bar input {
+    background: #0f3460; border: 1px solid #533483; color: #eee;
+    padding: 6px 8px; font-family: inherit; font-size: 13px;
+    border-radius: 3px; min-width: 0; flex: 1;
+}
+.conn-bar button {
+    padding: 6px 16px; border: none; border-radius: 3px;
+    font-family: inherit; font-size: 13px; cursor: pointer;
+    white-space: nowrap; flex-shrink: 0;
+}
+#btnConnect { background: #0f3460; color: #eee; }
+#btnDisconnect { background: #e94560; color: #eee; display: none; }
+
+.toolbar {
+    background: #16213e; padding: 6px 16px; display: flex;
+    align-items: center; gap: 10px; flex-shrink: 0;
+    border-bottom: 1px solid #0f3460; font-size: 12px;
+    flex-wrap: wrap;
+}
+.toolbar label {
+    color: #aaa; display: flex; align-items: center; gap: 4px;
+    white-space: nowrap;
+}
+.toolbar button {
+    padding: 3px 10px; background: #0f3460; border: 1px solid #533483;
+    color: #eee; border-radius: 3px; cursor: pointer; font-family: inherit;
+    font-size: 12px;
+}
+.toolbar .spacer { flex: 1; min-width: 0; }
+
+.led-group {
+    display: flex; align-items: center; gap: 14px; font-size: 12px;
+}
+.led-item { display: flex; align-items: center; gap: 4px; }
+.led {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #333; border: 1px solid #555;
+    transition: background 0.15s;
+}
+.led.active { background: #0f0; box-shadow: 0 0 6px #0f0; }
+.led-label { color: #aaa; }
+.pin-hint { color: #666; font-size: 11px; }
+
+.display-area {
+    flex: 1; overflow-y: auto; padding: 8px 16px;
+    font-size: 13px; line-height: 1.5; white-space: pre-wrap;
+    word-break: break-all; background: #0d0d1a;
+    -webkit-overflow-scrolling: touch;
+}
+.display-area .rx { color: #00ffff; }
+.display-area .tx { color: #ffff00; }
+.display-area .sys { color: #888; font-style: italic; }
+.display-area .ts { color: #7f8c8d; }
+
+.send-bar {
+    background: #16213e; padding: 8px 16px; display: flex;
+    gap: 8px; flex-shrink: 0; border-top: 1px solid #0f3460;
+}
+.send-bar input {
+    flex: 1; background: #0f3460; border: 1px solid #533483;
+    color: #eee; padding: 8px 10px; font-family: inherit;
+    font-size: 14px; border-radius: 3px; min-width: 0;
+}
+.send-bar input:focus { outline: none; border-color: #e94560; }
+.send-bar button {
+    padding: 8px 20px; background: #0f3460; border: 1px solid #533483;
+    color: #eee; border-radius: 3px; cursor: pointer;
+    font-family: inherit; font-size: 14px; white-space: nowrap; flex-shrink: 0;
+}
+.line-end {
+    display: flex; align-items: center; gap: 4px; font-size: 12px;
+    color: #aaa; flex-shrink: 0;
+}
+.line-end select {
+    background: #0f3460; border: 1px solid #533483; color: #eee;
+    padding: 4px; border-radius: 3px; font-family: inherit; font-size: 12px;
+}
+
+/* ---- Mobile ---- */
+@media (max-width: 600px) {
+    .header { padding: 8px 12px; gap: 8px; }
+    .header h1 { font-size: 14px; }
+    .header #statusText { font-size: 12px !important; }
+
+    .conn-bar {
+        padding: 8px 12px; flex-wrap: wrap;
+    }
+    .conn-bar label { display: none; }
+    .conn-bar input { font-size: 16px; padding: 10px 12px; }
+    .conn-bar button { padding: 10px 18px; font-size: 14px; }
+
+    .toolbar { padding: 6px 12px; gap: 8px; }
+    .toolbar label { font-size: 13px; }
+    .toolbar label input[type="checkbox"] {
+        width: 18px; height: 18px; accent-color: #e94560;
+    }
+    .toolbar button { padding: 6px 12px; font-size: 13px; }
+    .pin-hint { display: none; }
+
+    .display-area {
+        padding: 6px 12px; font-size: 12px; line-height: 1.4;
+    }
+
+    .send-bar {
+        padding: 8px 12px; gap: 6px;
+    }
+    .send-bar input {
+        font-size: 16px; padding: 10px 12px;
+    }
+    .send-bar button {
+        padding: 10px 16px; font-size: 14px;
+    }
+    .line-end select { font-size: 13px; padding: 6px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>StickS3 Serial Bridge</h1>
+    <span id="statusDot" class="status"></span>
+    <span id="statusText" style="font-size:13px;color:#aaa">Disconnected</span>
+</div>
+
+<div class="conn-bar">
+    <label>Server:</label>
+    <input id="inputHost" type="text" value="ws://192.168.4.1:8080"
+           placeholder="ws://ip:port" inputmode="url">
+    <button id="btnConnect" onclick="doConnect()">Connect</button>
+    <button id="btnDisconnect" onclick="doDisconnect()">Disconnect</button>
+</div>
+
+<div class="toolbar">
+    <label><input type="checkbox" id="chkHex"> Hex</label>
+    <label><input type="checkbox" id="chkAutoScroll" checked> Scroll</label>
+    <label><input type="checkbox" id="chkTimestamp"> TS</label>
+    <button onclick="clearDisplay()">Clear</button>
+    <span class="spacer"></span>
+    <div class="led-group">
+        <div class="led-item">
+            <div class="led" id="ledRx"></div>
+            <span class="led-label">RX</span>
+        </div>
+        <div class="led-item">
+            <div class="led" id="ledTx"></div>
+            <span class="led-label">TX</span>
+        </div>
+        <span class="pin-hint">RX→G5, TX→G4</span>
+    </div>
+</div>
+
+<div class="display-area" id="display"></div>
+
+<div class="send-bar">
+    <input id="inputSend" type="text" placeholder="Send data..."
+           inputmode="text" enterkeyhint="send"
+           onkeydown="if(event.key==='Enter')doSend()">
+    <div class="line-end">
+        <select id="selLineEnd">
+            <option value="none">None</option>
+            <option value="lf" selected>LF</option>
+            <option value="cr">CR</option>
+            <option value="crlf">CRLF</option>
+        </select>
+    </div>
+    <button onclick="doSend()">Send</button>
+</div>
+
+<script>
+let ws = null;
+let rxChunks = [];
+let rxActiveUntil = 0;
+let txActiveUntil = 0;
+
+function flashRx() {
+    rxActiveUntil = Date.now() + 1000;
+    document.getElementById('ledRx').classList.add('active');
+}
+function flashTx() {
+    txActiveUntil = Date.now() + 1000;
+    document.getElementById('ledTx').classList.add('active');
+}
+function updateLeds() {
+    const now = Date.now();
+    if (now > rxActiveUntil) document.getElementById('ledRx').classList.remove('active');
+    if (now > txActiveUntil) document.getElementById('ledTx').classList.remove('active');
+}
+
+function formatTimestamp() {
+    const d = new Date();
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    const ms = String(d.getMilliseconds()).padStart(3, '0');
+    return h + ':' + m + ':' + s + '.' + ms;
+}
+
+function log(cls, text) {
+    const el = document.getElementById('display');
+    if (document.getElementById('chkTimestamp').checked) {
+        const tsSpan = document.createElement('span');
+        tsSpan.className = 'ts';
+        tsSpan.textContent = '[' + formatTimestamp() + '] ';
+        el.appendChild(tsSpan);
+    }
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = text + '\n';
+    el.appendChild(span);
+    while (el.children.length > 5000) el.removeChild(el.firstChild);
+    if (document.getElementById('chkAutoScroll').checked) {
+        el.scrollTop = el.scrollHeight;
+    }
+}
+
+function setStatus(state, text) {
+    document.getElementById('statusDot').className = 'status ' + state;
+    document.getElementById('statusText').textContent = text;
+}
+
+function formatHex(buf) {
+    const bytes = new Uint8Array(buf);
+    let hex = '';
+    for (let i = 0; i < bytes.length; i++) {
+        hex += bytes[i].toString(16).padStart(2, '0') + ' ';
+    }
+    return hex.trim();
+}
+
+function flushRxBuffer() {
+    if (rxChunks.length === 0) return;
+    const totalLen = rxChunks.reduce((s, c) => s + c.byteLength, 0);
+    const merged = new Uint8Array(totalLen);
+    let off = 0;
+    for (const chunk of rxChunks) {
+        merged.set(new Uint8Array(chunk), off);
+        off += chunk.byteLength;
+    }
+    rxChunks = [];
+    if (document.getElementById('chkHex').checked) {
+        log('rx', 'RX: ' + formatHex(merged.buffer));
+    } else {
+        log('rx', 'RX: ' + new TextDecoder('utf-8', {fatal: false}).decode(merged.buffer));
+    }
+}
+
+function doConnect() {
+    const url = document.getElementById('inputHost').value.trim();
+    if (!url) return;
+    if (ws) doDisconnect();
+    setStatus('connecting', 'Connecting...');
+    log('sys', 'Connecting to ' + url + '...');
+    try {
+        ws = new WebSocket(url);
+        ws.binaryType = 'arraybuffer';
+    } catch(e) {
+        setStatus('', 'Disconnected');
+        log('sys', 'Invalid URL: ' + e.message);
+        return;
+    }
+    ws.onopen = function() {
+        setStatus('connected', 'Connected');
+        log('sys', 'Connected to ' + url);
+        document.getElementById('btnConnect').style.display = 'none';
+        document.getElementById('btnDisconnect').style.display = 'inline-block';
+    };
+    ws.onmessage = function(evt) {
+        if (evt.data instanceof ArrayBuffer) { flashRx(); rxChunks.push(evt.data); }
+    };
+    ws.onclose = function() {
+        setStatus('', 'Disconnected');
+        log('sys', 'Connection closed');
+        ws = null;
+        document.getElementById('btnConnect').style.display = '';
+        document.getElementById('btnDisconnect').style.display = 'none';
+    };
+    ws.onerror = function() { log('sys', 'WebSocket error'); };
+}
+
+function doDisconnect() {
+    if (ws) { ws.close(); ws = null; }
+    setStatus('', 'Disconnected');
+    document.getElementById('btnConnect').style.display = '';
+    document.getElementById('btnDisconnect').style.display = 'none';
+}
+
+function doSend() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) { log('sys', 'Not connected'); return; }
+    const input = document.getElementById('inputSend');
+    let data = input.value;
+    if (!data) return;
+    const le = document.getElementById('selLineEnd').value;
+    if (le === 'lf') data += '\n';
+    else if (le === 'cr') data += '\r';
+    else if (le === 'crlf') data += '\r\n';
+    ws.send(new TextEncoder().encode(data).buffer);
+    flashTx();
+    log('tx', 'TX: ' + data);
+    input.value = '';
+}
+
+function clearDisplay() {
+    document.getElementById('display').innerHTML = '';
+}
+
+setInterval(function() { flushRxBuffer(); updateLeds(); }, 50);
+
+if (window.location.hostname && window.location.hostname !== 'localhost') {
+    document.getElementById('inputHost').value = 'ws://' + window.location.hostname + ':8080';
+}
+</script>
+</body>
+</html>
