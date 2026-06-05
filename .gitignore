@@ -3,6 +3,7 @@ build/
 
 # ESP-IDF managed components (auto-downloaded)
 managed_components/
+dependencies.lock
 
 # SDK config (user-specific, generated)
 sdkconfig
