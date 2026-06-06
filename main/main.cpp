@@ -4,6 +4,7 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "esp_pm.h"
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 
@@ -28,8 +29,26 @@ static QueueHandle_t s_app_event_queue;
 static ui_state_t s_current_state = UI_STATE_WIFI_DISCONNECTED;
 static uint32_t s_baud = 1000000;
 
+// Power management state
+static bool s_screen_asleep = false;
+static bool s_wake_suppress_next_click = false;
+static TickType_t s_last_activity_tick = 0;
+static TickType_t s_last_fwd_change_tick = 0;
+static uint64_t s_last_rx_bytes = 0;
+static uint64_t s_last_tx_bytes = 0;
+
+#define IDLE_SHUTDOWN_TICKS  pdMS_TO_TICKS(5UL * 60 * 1000)  // 5 minutes
+#define SCREEN_OFF_TICKS     pdMS_TO_TICKS(20UL * 1000)       // 20 seconds
+#define LOW_BATTERY_MV       3400
+
 static const uint32_t BAUD_RATES[] = { 1000000, 1500000 };
 static const int BAUD_COUNT = sizeof(BAUD_RATES) / sizeof(BAUD_RATES[0]);
+
+// ISR callback: send wake event from GPIO interrupt
+static void IRAM_ATTR button_wake_isr(void *arg) {
+    app_event_t ev = APP_EVENT_WAKE_SCREEN;
+    xQueueSendFromISR(s_app_event_queue, &ev, NULL);
+}
 
 static void transition_to(ui_state_t new_state) {
     if (new_state == s_current_state) return;
@@ -113,10 +132,40 @@ static void cycle_baud_rate(void) {
     sticks3_audio_play_tone(800, 100, 20);
 }
 
+static void screen_wake(void) {
+    if (!s_screen_asleep) return;
+    ESP_LOGI(TAG, "Screen wake");
+    sticks3_button_disable_wake();
+    sticks3_display_wake();
+    sticks3_ui_resume();
+    s_screen_asleep = false;
+    s_wake_suppress_next_click = true;
+    s_last_activity_tick = xTaskGetTickCount();
+
+    // Restore CPU to full speed
+    esp_pm_config_t pm_cfg = {
+        .max_freq_mhz = 240,
+        .min_freq_mhz = 80,
+        .light_sleep_enable = false,
+    };
+    esp_pm_configure(&pm_cfg);
+}
+
 static void handle_event(app_event_t event) {
     switch (event) {
+        case APP_EVENT_WAKE_SCREEN:
+            ESP_LOGI(TAG, "Wake screen event");
+            screen_wake();
+            break;
+
         case APP_EVENT_BTN_A_CLICK:
             ESP_LOGI(TAG, "BtnA click, state=%d", s_current_state);
+            s_last_activity_tick = xTaskGetTickCount();
+            if (s_wake_suppress_next_click) {
+                s_wake_suppress_next_click = false;
+                ESP_LOGI(TAG, "BtnA click suppressed (wake)");
+                break;
+            }
             if (s_current_state == UI_STATE_WIFI_WAITING ||
                 s_current_state == UI_STATE_BRIDGE_ACTIVE) {
                 cycle_baud_rate();
@@ -125,6 +174,12 @@ static void handle_event(app_event_t event) {
 
         case APP_EVENT_BTN_A_LONG_PRESS:
             ESP_LOGI(TAG, "BtnA long press, state=%d", s_current_state);
+            s_last_activity_tick = xTaskGetTickCount();
+            if (s_wake_suppress_next_click) {
+                s_wake_suppress_next_click = false;
+                ESP_LOGI(TAG, "BtnA long press suppressed (wake)");
+                break;
+            }
             if (s_current_state == UI_STATE_BRIDGE_ACTIVE) {
                 transition_to(UI_STATE_WIFI_WAITING);
             }
@@ -132,6 +187,12 @@ static void handle_event(app_event_t event) {
 
         case APP_EVENT_BTN_B_LONG_PRESS:
             ESP_LOGI(TAG, "BtnB long press, state=%d", s_current_state);
+            s_last_activity_tick = xTaskGetTickCount();
+            if (s_wake_suppress_next_click) {
+                s_wake_suppress_next_click = false;
+                ESP_LOGI(TAG, "BtnB long press suppressed (wake)");
+                break;
+            }
             if (s_current_state == UI_STATE_WIFI_DISCONNECTED) {
                 transition_to(UI_STATE_PROVISIONING);
             } else if (s_current_state == UI_STATE_WIFI_WAITING ||
@@ -141,12 +202,17 @@ static void handle_event(app_event_t event) {
             break;
 
         case APP_EVENT_BTN_B_CLICK:
-            // Side button click — unused
+            s_last_activity_tick = xTaskGetTickCount();
+            if (s_wake_suppress_next_click) {
+                s_wake_suppress_next_click = false;
+                break;
+            }
             break;
 
         case APP_EVENT_WIFI_CONNECTED:
             ESP_LOGI(TAG, "WiFi connected");
             transition_to(UI_STATE_WIFI_WAITING);
+            s_last_activity_tick = xTaskGetTickCount();
             break;
 
         case APP_EVENT_WIFI_FAILED:
@@ -158,12 +224,14 @@ static void handle_event(app_event_t event) {
 
         case APP_EVENT_TCP_CLIENT_CONNECTED:
             ESP_LOGI(TAG, "TCP client connected");
+            screen_wake();
             transition_to(UI_STATE_BRIDGE_ACTIVE);
             sticks3_ui_update_ws_connected(true);
             break;
 
         case APP_EVENT_TCP_CLIENT_DISCONNECTED:
             ESP_LOGI(TAG, "TCP client disconnected");
+            screen_wake();
             sticks3_ui_update_ws_connected(false);
             transition_to(UI_STATE_WIFI_WAITING);
             break;
@@ -203,6 +271,62 @@ static void tcp_monitor_task(void *arg) {
     }
 }
 
+// Task to monitor idle state and manage power saving
+static void idle_monitor_task(void *arg) {
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        TickType_t now = xTaskGetTickCount();
+
+        // 1. Low-battery check
+        uint16_t mv = 0;
+        bool charging = false;
+        if (sticks3_power_get_battery(&mv) == ESP_OK) {
+            sticks3_power_is_charging(&charging);
+            if (!charging && mv < LOW_BATTERY_MV) {
+                ESP_LOGW(TAG, "Low battery shutdown: %u mV", mv);
+                sticks3_audio_play_tone(300, 500, 50);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                sticks3_power_shutdown();
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Should not reach here
+            }
+        }
+
+        // 2. Idle forwarding check (only when WiFi connected)
+        if (!charging && s_current_state >= UI_STATE_WIFI_WAITING) {
+            uint64_t rx = 0, tx = 0;
+            sticks3_uart_bridge_get_stats(&rx, &tx);
+            if (rx != s_last_rx_bytes || tx != s_last_tx_bytes) {
+                s_last_fwd_change_tick = now;
+                s_last_rx_bytes = rx;
+                s_last_tx_bytes = tx;
+            } else if ((now - s_last_fwd_change_tick) > IDLE_SHUTDOWN_TICKS) {
+                ESP_LOGW(TAG, "Idle shutdown: no data forwarded for 5 min");
+                sticks3_power_shutdown();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+
+        // 3. Screen-off check (only when WiFi connected and screen is on)
+        if (s_current_state >= UI_STATE_WIFI_WAITING && !s_screen_asleep) {
+            if ((now - s_last_activity_tick) > SCREEN_OFF_TICKS) {
+                ESP_LOGI(TAG, "Screen off: idle 20s");
+                s_screen_asleep = true;
+                sticks3_display_sleep();
+                sticks3_ui_pause();
+                sticks3_button_enable_wake(button_wake_isr, NULL);
+
+                // Reduce CPU frequency to save power
+                esp_pm_config_t pm_cfg = {
+                    .max_freq_mhz = 80,
+                    .min_freq_mhz = 80,
+                    .light_sleep_enable = false,
+                };
+                esp_pm_configure(&pm_cfg);
+            }
+        }
+    }
+}
+
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "StickS3 WiFi Bridge starting...");
 
@@ -213,13 +337,21 @@ extern "C" void app_main(void) {
     ESP_ERROR_CHECK(sticks3_button_init());
     ESP_ERROR_CHECK(sticks3_audio_speaker_init());
 
+    // Set battery low-voltage protection (hardware enforced)
+    sticks3_power_set_lvp(LOW_BATTERY_MV);
+
     // NVS init
     ESP_ERROR_CHECK(sticks3_nvs_init());
     sticks3_nvs_load_baud(&s_baud);
     ESP_LOGI(TAG, "Loaded baud: %u", (unsigned)s_baud);
 
-    // WiFi init
+    // WiFi init + modem sleep for power saving
     ESP_ERROR_CHECK(sticks3_wifi_init());
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+
+    // Init power management tracking
+    s_last_activity_tick = xTaskGetTickCount();
+    s_last_fwd_change_tick = s_last_activity_tick;
 
     // Event queue
     s_app_event_queue = xQueueCreate(16, sizeof(app_event_t));
@@ -250,6 +382,7 @@ extern "C" void app_main(void) {
     // Monitor tasks
     xTaskCreate(wifi_monitor_task, "wifi_mon", 4096, NULL, 4, NULL);
     xTaskCreate(tcp_monitor_task, "tcp_mon", 4096, NULL, 4, NULL);
+    xTaskCreate(idle_monitor_task, "idle_mon", 4096, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "System ready. Entering main loop.");
 

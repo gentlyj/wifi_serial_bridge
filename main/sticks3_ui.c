@@ -10,6 +10,7 @@ static const char *TAG = "sticks3_ui";
 
 static QueueHandle_t s_event_queue;
 static ui_state_t s_current_state;
+static volatile bool s_screen_asleep = false;
 
 static lv_obj_t *s_label_battery;
 
@@ -54,22 +55,42 @@ static void battery_timer_cb(lv_timer_t *timer) {
 
 // BtnA callbacks (front button, point 0)
 static void btn_a_click_cb(lv_event_t *e) {
+    if (s_screen_asleep) {
+        app_event_t ev = APP_EVENT_WAKE_SCREEN;
+        xQueueSend(s_event_queue, &ev, 0);
+        return;
+    }
     app_event_t ev = APP_EVENT_BTN_A_CLICK;
     xQueueSend(s_event_queue, &ev, 0);
 }
 
 static void btn_a_longpress_cb(lv_event_t *e) {
+    if (s_screen_asleep) {
+        app_event_t ev = APP_EVENT_WAKE_SCREEN;
+        xQueueSend(s_event_queue, &ev, 0);
+        return;
+    }
     app_event_t ev = APP_EVENT_BTN_A_LONG_PRESS;
     xQueueSend(s_event_queue, &ev, 0);
 }
 
 // BtnB callbacks (side button, point 1)
 static void btn_b_click_cb(lv_event_t *e) {
+    if (s_screen_asleep) {
+        app_event_t ev = APP_EVENT_WAKE_SCREEN;
+        xQueueSend(s_event_queue, &ev, 0);
+        return;
+    }
     app_event_t ev = APP_EVENT_BTN_B_CLICK;
     xQueueSend(s_event_queue, &ev, 0);
 }
 
 static void btn_b_longpress_cb(lv_event_t *e) {
+    if (s_screen_asleep) {
+        app_event_t ev = APP_EVENT_WAKE_SCREEN;
+        xQueueSend(s_event_queue, &ev, 0);
+        return;
+    }
     app_event_t ev = APP_EVENT_BTN_B_LONG_PRESS;
     xQueueSend(s_event_queue, &ev, 0);
 }
@@ -84,15 +105,27 @@ static void create_common_widgets(void) {
     lv_obj_set_style_text_font(s_label_battery, FONT, 0);
     lv_obj_align(s_label_battery, LV_ALIGN_TOP_RIGHT, -5, 10);
 
-    // Invisible event area covering bottom strip for BtnA (front button)
+    // Invisible event area covering bottom-left strip for BtnA (front button)
+    // BtnA indev point: (33, 230)
     lv_obj_t *btn_a_area = lv_obj_create(scr);
-    lv_obj_set_size(btn_a_area, 135, 20);
+    lv_obj_set_size(btn_a_area, 68, 20);
     lv_obj_set_pos(btn_a_area, 0, 220);
     lv_obj_set_style_bg_opa(btn_a_area, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(btn_a_area, 0, 0);
     lv_obj_clear_flag(btn_a_area, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(btn_a_area, btn_a_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(btn_a_area, btn_a_longpress_cb, LV_EVENT_LONG_PRESSED, NULL);
+
+    // Invisible event area covering bottom-right strip for BtnB (side button)
+    // BtnB indev point: (100, 230)
+    lv_obj_t *btn_b_area = lv_obj_create(scr);
+    lv_obj_set_size(btn_b_area, 67, 20);
+    lv_obj_set_pos(btn_b_area, 68, 220);
+    lv_obj_set_style_bg_opa(btn_b_area, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(btn_b_area, 0, 0);
+    lv_obj_clear_flag(btn_b_area, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(btn_b_area, btn_b_click_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(btn_b_area, btn_b_longpress_cb, LV_EVENT_LONG_PRESSED, NULL);
 
     lv_timer_create(battery_timer_cb, 1000, NULL);
 }
@@ -312,4 +345,20 @@ void sticks3_ui_update_ws_connected(bool connected) {
             lv_color_hex(connected ? COLOR_GREEN : COLOR_GRAY), 0);
     }
     lvgl_port_unlock();
+}
+
+void sticks3_ui_pause(void) {
+    lvgl_port_stop();
+    s_screen_asleep = true;
+    ESP_LOGI(TAG, "UI paused (screen asleep)");
+}
+
+void sticks3_ui_resume(void) {
+    s_screen_asleep = false;
+    lvgl_port_resume();
+    ESP_LOGI(TAG, "UI resumed (screen awake)");
+}
+
+bool sticks3_ui_is_screen_asleep(void) {
+    return s_screen_asleep;
 }

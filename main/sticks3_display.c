@@ -67,6 +67,16 @@ void sticks3_display_set_brightness(uint8_t brightness) {
     ledc_update_duty(LCD_PWM_SPEED, LCD_PWM_CHANNEL);
 }
 
+void sticks3_display_sleep(void) {
+    sticks3_display_set_brightness(0);
+    ESP_LOGI(TAG, "Display sleep (backlight off)");
+}
+
+void sticks3_display_wake(void) {
+    sticks3_display_set_brightness(200);
+    ESP_LOGI(TAG, "Display wake (backlight restored)");
+}
+
 esp_err_t sticks3_display_init(void) {
     ESP_LOGI(TAG, "Initializing ST7789 display...");
 

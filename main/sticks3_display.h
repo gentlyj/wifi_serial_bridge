@@ -21,6 +21,16 @@ esp_err_t sticks3_display_init(void);
  */
 void sticks3_display_set_brightness(uint8_t brightness);
 
+/**
+ * @brief Turn off backlight (display sleep)
+ */
+void sticks3_display_sleep(void);
+
+/**
+ * @brief Restore backlight to default brightness (display wake)
+ */
+void sticks3_display_wake(void);
+
 #ifdef __cplusplus
 }
 #endif

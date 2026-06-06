@@ -2,6 +2,9 @@
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# Enable power management for CPU frequency scaling
+CONFIG_PM_ENABLE=y
+
 # Enable bigger LVGL fonts
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_20=y

@@ -45,6 +45,17 @@ esp_err_t sticks3_power_speaker_pa_enable(void);
  */
 esp_err_t sticks3_power_speaker_pa_disable(void);
 
+/**
+ * @brief Shut down the system via M5PM1 (cuts all power)
+ */
+esp_err_t sticks3_power_shutdown(void);
+
+/**
+ * @brief Set battery low-voltage protection threshold
+ * @param mv Threshold in millivolts (2000-4000 range, hardware-enforced auto-shutdown)
+ */
+esp_err_t sticks3_power_set_lvp(uint16_t mv);
+
 #ifdef __cplusplus
 }
 #endif

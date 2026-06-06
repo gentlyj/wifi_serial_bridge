@@ -95,3 +95,23 @@ esp_err_t sticks3_power_speaker_pa_disable(void) {
     ESP_LOGD(TAG, "Speaker PA disabled (PM1 GPIO3 LOW)");
     return ESP_OK;
 }
+
+esp_err_t sticks3_power_shutdown(void) {
+    ESP_LOGW(TAG, "System shutdown via M5PM1");
+    m5pm1_err_t err = pm1.shutdown();
+    if (err != M5PM1_OK) {
+        ESP_LOGE(TAG, "shutdown failed: %d", err);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sticks3_power_set_lvp(uint16_t mv) {
+    ESP_LOGI(TAG, "Setting battery LVP to %u mV", mv);
+    m5pm1_err_t err = pm1.setBatteryLvp(mv);
+    if (err != M5PM1_OK) {
+        ESP_LOGE(TAG, "setBatteryLvp failed: %d", err);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}

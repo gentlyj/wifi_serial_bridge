@@ -9,14 +9,25 @@ static const char *TAG = "sticks3_button";
 #define BTN_B_PIN  12
 #define BTN_COUNT  2
 
-// BtnA: front strip at bottom of screen → LVGL point at bottom
-// BtnB: side button → no screen area needed, point off-screen
+// BtnA: front strip at bottom-left of screen
+// BtnB: side button → mapped to bottom-right area for LVGL event delivery
 static const lv_point_t btn_points[BTN_COUNT] = {
-    {67, 225},   // BtnA — front button, bottom of screen
-    {200, 225},  // BtnB — side button, off visible area
+    {33, 230},   // BtnA — front button, bottom-left
+    {100, 230},  // BtnB — side button, bottom-right
 };
 
 static lv_indev_t *btn_indev = NULL;
+
+// Wake interrupt state
+static button_wake_cb_t s_wake_cb = NULL;
+static void *s_wake_arg = NULL;
+static bool s_wake_irq_enabled = false;
+
+static void IRAM_ATTR button_isr_handler(void *arg) {
+    if (s_wake_cb) {
+        s_wake_cb(s_wake_arg);
+    }
+}
 
 static void button_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     bool btn_a = !gpio_get_level(BTN_A_PIN);
@@ -58,7 +69,44 @@ esp_err_t sticks3_button_init(void) {
     lv_indev_set_read_cb(btn_indev, button_read_cb);
     lv_indev_set_button_points(btn_indev, btn_points);
 
+    // Install GPIO ISR service (shared, once)
+    gpio_install_isr_service(0);
+
     ESP_LOGI(TAG, "Buttons initialized: GPIO%d (BtnA/front), GPIO%d (BtnB/side)",
              BTN_A_PIN, BTN_B_PIN);
     return ESP_OK;
+}
+
+esp_err_t sticks3_button_enable_wake(button_wake_cb_t callback, void *arg) {
+    if (s_wake_irq_enabled) return ESP_OK;
+
+    s_wake_cb = callback;
+    s_wake_arg = arg;
+
+    // Reconfigure both button pins to trigger on falling edge (active-low press)
+    gpio_set_intr_type(BTN_A_PIN, GPIO_INTR_NEGEDGE);
+    gpio_set_intr_type(BTN_B_PIN, GPIO_INTR_NEGEDGE);
+
+    gpio_isr_handler_add(BTN_A_PIN, button_isr_handler, (void *)(intptr_t)BTN_A_PIN);
+    gpio_isr_handler_add(BTN_B_PIN, button_isr_handler, (void *)(intptr_t)BTN_B_PIN);
+
+    s_wake_irq_enabled = true;
+    ESP_LOGI(TAG, "Button wake IRQ enabled");
+    return ESP_OK;
+}
+
+void sticks3_button_disable_wake(void) {
+    if (!s_wake_irq_enabled) return;
+
+    gpio_isr_handler_remove(BTN_A_PIN);
+    gpio_isr_handler_remove(BTN_B_PIN);
+
+    // Restore to no interrupt (LVGL polling will handle input)
+    gpio_set_intr_type(BTN_A_PIN, GPIO_INTR_DISABLE);
+    gpio_set_intr_type(BTN_B_PIN, GPIO_INTR_DISABLE);
+
+    s_wake_irq_enabled = false;
+    s_wake_cb = NULL;
+    s_wake_arg = NULL;
+    ESP_LOGI(TAG, "Button wake IRQ disabled");
 }

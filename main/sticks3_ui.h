@@ -25,6 +25,7 @@ typedef enum {
     APP_EVENT_BTN_A_LONG_PRESS,
     APP_EVENT_BTN_B_CLICK,
     APP_EVENT_BTN_B_LONG_PRESS,
+    APP_EVENT_WAKE_SCREEN,
 } app_event_t;
 
 void sticks3_ui_init(QueueHandle_t event_queue);
@@ -34,6 +35,9 @@ void sticks3_ui_update_baud(uint32_t baud);
 void sticks3_ui_update_stats(uint64_t rx_bytes, uint64_t tx_bytes);
 void sticks3_ui_update_status(const char *msg);
 void sticks3_ui_update_ws_connected(bool connected);
+void sticks3_ui_pause(void);
+void sticks3_ui_resume(void);
+bool sticks3_ui_is_screen_asleep(void);
 
 #ifdef __cplusplus
 }
