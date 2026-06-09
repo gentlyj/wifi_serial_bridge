@@ -63,6 +63,32 @@ body {
 }
 .toolbar .spacer { flex: 1; min-width: 0; }
 
+.ctrl-group {
+    display: flex; align-items: center; gap: 6px;
+}
+.ctrl-group .ctrl-sep {
+    width: 1px; height: 14px; background: #533483;
+}
+.ctrl-btn {
+    padding: 3px 8px !important; font-size: 11px !important;
+    background: #1a0a2e !important; border-color: #e94560 !important;
+    color: #e94560 !important;
+}
+.ctrl-btn:hover {
+    background: #e94560 !important; color: #fff !important;
+}
+.ctrl-btn:disabled {
+    opacity: 0.3; cursor: not-allowed;
+}
+.batt-display {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 3px; font-size: 11px;
+    background: #0a1a0a; border: 1px solid #1a3a1a; color: #4caf50;
+}
+.batt-display .batt-icon {
+    font-size: 13px;
+}
+
 .led-group {
     display: flex; align-items: center; gap: 14px; font-size: 12px;
 }
@@ -85,6 +111,7 @@ body {
 .display-area .rx { color: #00ffff; }
 .display-area .tx { color: #ffff00; }
 .display-area .sys { color: #888; font-style: italic; }
+.display-area .ctrl { color: #e94560; }
 .display-area .ts { color: #7f8c8d; }
 
 .send-bar {
@@ -110,6 +137,16 @@ body {
     background: #0f3460; border: 1px solid #533483; color: #eee;
     padding: 4px; border-radius: 3px; font-family: inherit; font-size: 12px;
 }
+.toolbar-bottom {
+    background: #16213e; padding: 6px 16px; display: flex;
+    align-items: center; gap: 10px; flex-shrink: 0;
+    border-top: 1px solid #0f3460; font-size: 12px;
+}
+.toolbar-bottom button {
+    padding: 3px 10px; background: #0f3460; border: 1px solid #533483;
+    color: #eee; border-radius: 3px; cursor: pointer; font-family: inherit;
+    font-size: 12px;
+}
 
 /* ---- Mobile ---- */
 @media (max-width: 600px) {
@@ -132,6 +169,9 @@ body {
     .toolbar button { padding: 6px 12px; font-size: 13px; }
     .pin-hint { display: none; }
 
+    .ctrl-group .ctrl-sep { display: none; }
+    .ctrl-btn { padding: 4px 8px !important; font-size: 12px !important; }
+
     .display-area {
         padding: 6px 12px; font-size: 12px; line-height: 1.4;
     }
@@ -146,6 +186,12 @@ body {
         padding: 10px 16px; font-size: 14px;
     }
     .line-end select { font-size: 13px; padding: 6px; }
+    .toolbar-bottom { padding: 6px 12px; }
+    .toolbar-bottom label { font-size: 13px; }
+    .toolbar-bottom label input[type="checkbox"] {
+        width: 18px; height: 18px; accent-color: #e94560;
+    }
+    .toolbar-bottom button { padding: 6px 12px; font-size: 13px; }
 }
 </style>
 </head>
@@ -167,9 +213,16 @@ body {
 
 <div class="toolbar">
     <label><input type="checkbox" id="chkHex"> Hex</label>
-    <label><input type="checkbox" id="chkAutoScroll" checked> Scroll</label>
+    <label><input type="checkbox" id="chkAutoScroll" checked onchange="syncScroll(this.checked)"> Scroll</label>
     <label><input type="checkbox" id="chkTimestamp"> TS</label>
     <button onclick="clearDisplay()">Clear</button>
+    <div class="ctrl-group" id="ctrlGroup" style="display:none">
+        <span class="ctrl-sep"></span>
+        <button class="ctrl-btn" onclick="sendCmd('REBOOT')" id="btnReboot">Reboot</button>
+        <button class="ctrl-btn" onclick="sendCmd('SCR_OFF')" id="btnScrOff">Screen Off</button>
+        <button class="ctrl-btn" onclick="sendCmd('SCR_ON')" id="btnScrOn">Screen On</button>
+        <span class="batt-display" id="battDisplay" style="display:none"><span class="batt-icon" id="battIcon"></span><span id="battText">--</span></span>
+    </div>
     <span class="spacer"></span>
     <div class="led-group">
         <div class="led-item">
@@ -185,7 +238,10 @@ body {
 </div>
 
 <div class="display-area" id="display"></div>
-
+<div class="toolbar-bottom">
+    <label><input type="checkbox" id="chkAutoScroll2" checked onchange="syncScroll(this.checked)"> Scroll</label>
+    <button onclick="clearDisplay()">Clear</button>
+</div>
 <div class="send-bar">
     <input id="inputSend" type="text" placeholder="Send data..."
            inputmode="text" enterkeyhint="send"
@@ -206,6 +262,8 @@ let ws = null;
 let rxChunks = [];
 let rxActiveUntil = 0;
 let txActiveUntil = 0;
+let battTimer = null;
+let battFailCount = 0;
 
 function flashRx() {
     rxActiveUntil = Date.now() + 1000;
@@ -251,6 +309,7 @@ function log(cls, text) {
 function setStatus(state, text) {
     document.getElementById('statusDot').className = 'status ' + state;
     document.getElementById('statusText').textContent = text;
+    document.getElementById('ctrlGroup').style.display = state === 'connected' ? 'flex' : 'none';
 }
 
 function formatHex(buf) {
@@ -279,6 +338,49 @@ function flushRxBuffer() {
     }
 }
 
+function updateBattDisplay(mv) {
+    const el = document.getElementById('battDisplay');
+    const txt = document.getElementById('battText');
+    const icon = document.getElementById('battIcon');
+    el.style.display = 'inline-flex';
+    const v = (mv / 1000).toFixed(2);
+    txt.textContent = v + 'V';
+    if (mv >= 4000) { icon.textContent = '\u{1F50C}'; el.style.color = '#4caf50'; }
+    else if (mv >= 3700) { icon.textContent = '\u{1F50B}'; el.style.color = '#4caf50'; }
+    else if (mv >= 3500) { icon.textContent = '\u{1F50B}'; el.style.color = '#ff9800'; }
+    else { icon.textContent = '\u{1F50B}'; el.style.color = '#f44336'; }
+}
+function startBattPolling() {
+    stopBattPolling();
+    battFailCount = 0;
+    sendCmd('BATT');
+    battTimer = setInterval(function() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) { stopBattPolling(); return; }
+        sendCmd('BATT');
+    }, 10000);
+}
+function stopBattPolling() {
+    if (battTimer) { clearInterval(battTimer); battTimer = null; }
+    battFailCount = 0;
+    var el = document.getElementById('battDisplay');
+    if (el) el.style.display = 'none';
+}
+function handleBattResp(resp) {
+    var parts = resp.split(' ');
+    if (parts.length >= 2 && parts[0] === 'BATT') {
+        var mv = parseInt(parts[1], 10);
+        if (!isNaN(mv) && mv > 0) {
+            battFailCount = 0;
+            updateBattDisplay(mv);
+            return;
+        }
+    }
+    battFailCount++;
+    if (battFailCount >= 2) {
+        log('sys', 'Battery query failed, connection may be lost');
+        doDisconnect();
+    }
+}
 function doConnect() {
     const url = document.getElementById('inputHost').value.trim();
     if (!url) return;
@@ -298,11 +400,31 @@ function doConnect() {
         log('sys', 'Connected to ' + url);
         document.getElementById('btnConnect').style.display = 'none';
         document.getElementById('btnDisconnect').style.display = 'inline-block';
+        startBattPolling();
     };
     ws.onmessage = function(evt) {
-        if (evt.data instanceof ArrayBuffer) { flashRx(); rxChunks.push(evt.data); }
+        if (evt.data instanceof ArrayBuffer) {
+            // Check for \x01 control protocol prefix
+            const bytes = new Uint8Array(evt.data);
+            if (bytes.length > 1 && bytes[0] === 0x01) {
+                const resp = new TextDecoder().decode(evt.data.slice(1));
+                if (resp.startsWith('BATT ')) { handleBattResp(resp); }
+                else { log('ctrl', 'CMD: ' + resp); }
+            } else {
+                flashRx(); rxChunks.push(evt.data);
+            }
+        } else {
+            // Text frame - check for \x01 prefix
+            const txt = evt.data;
+            if (txt.charCodeAt(0) === 1) {
+                const resp = txt.slice(1);
+                if (resp.startsWith('BATT ')) { handleBattResp(resp); }
+                else { log('ctrl', 'CMD: ' + resp); }
+            }
+        }
     };
     ws.onclose = function() {
+        stopBattPolling();
         setStatus('', 'Disconnected');
         log('sys', 'Connection closed');
         ws = null;
@@ -334,15 +456,30 @@ function doSend() {
     input.value = '';
 }
 
+function sendCmd(cmd) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) { log('sys', 'Not connected'); return; }
+    // Control protocol: \x01 prefix + command string
+    ws.send(String.fromCharCode(1) + cmd);
+    log('ctrl', 'CMD: ' + cmd);
+}
+
 function clearDisplay() {
     document.getElementById('display').innerHTML = '';
+}
+function syncScroll(checked) {
+    document.getElementById('chkAutoScroll').checked = checked;
+    document.getElementById('chkAutoScroll2').checked = checked;
 }
 
 setInterval(function() { flushRxBuffer(); updateLeds(); }, 50);
 
+// Auto-detect host IP for WebSocket URL
 if (window.location.hostname && window.location.hostname !== 'localhost') {
     document.getElementById('inputHost').value = 'ws://' + window.location.hostname + ':8080';
 }
+
+// Auto-connect on page load
+doConnect();
 </script>
 </body>
 </html>

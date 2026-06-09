@@ -31,6 +31,9 @@ static bool s_client_connected = false;
 static uint8_t s_frame_buf[FRAME_BUF_SIZE];
 static size_t  s_frame_len = 0;
 
+// Control command callback
+static ctrl_cmd_cb_t s_ctrl_cb = NULL;
+
 static bool compute_accept_key(const char *client_key, char *out, size_t out_size) {
     char concat[256];
     int len = snprintf(concat, sizeof(concat), "%s%s", client_key, WS_GUID);
@@ -161,10 +164,47 @@ static bool process_frames(void) {
             goto consume_frame;
         }
 
-        // Data frame → UART
-        if (payload_len > 0 && tcp_to_uart_buf) {
-            xStreamBufferSend(tcp_to_uart_buf, p + hdr_size, (size_t)payload_len,
-                              pdMS_TO_TICKS(100));
+        // Data frame → control command or UART
+        if (payload_len > 0) {
+            uint8_t *data = p + hdr_size;
+            // Control protocol: \x01 prefix → dispatch to callback, don't forward to UART
+            if (data[0] == 0x01 && s_ctrl_cb) {
+                // Extract command string (skip prefix byte)
+                size_t cmd_len = (size_t)payload_len - 1;
+                char *cmd = malloc(cmd_len + 1);
+                if (cmd) {
+                    memcpy(cmd, data + 1, cmd_len);
+                    cmd[cmd_len] = '\0';
+                    ESP_LOGI(TAG, "Control cmd: [%s]", cmd);
+                    char resp[128] = {0};
+                    if (s_ctrl_cb(cmd, resp, sizeof(resp))) {
+                        // Send response back as text frame with \x01 prefix
+                        size_t resp_len = strlen(resp);
+                        size_t frame_payload = resp_len + 1;
+                        uint8_t hdr[4];
+                        int hdr_len;
+                        if (frame_payload < 126) {
+                            hdr[0] = 0x81; // text frame
+                            hdr[1] = (uint8_t)frame_payload;
+                            hdr_len = 2;
+                        } else {
+                            hdr[0] = 0x81;
+                            hdr[1] = 126;
+                            hdr[2] = (frame_payload >> 8) & 0xFF;
+                            hdr[3] = frame_payload & 0xFF;
+                            hdr_len = 4;
+                        }
+                        send(s_client_sock, hdr, hdr_len, 0);
+                        uint8_t prefix = 0x01;
+                        send(s_client_sock, &prefix, 1, 0);
+                        send(s_client_sock, resp, resp_len, 0);
+                    }
+                    free(cmd);
+                }
+            } else if (tcp_to_uart_buf) {
+                xStreamBufferSend(tcp_to_uart_buf, data, (size_t)payload_len,
+                                  pdMS_TO_TICKS(100));
+            }
         }
 
 consume_frame:
@@ -358,4 +398,8 @@ esp_err_t sticks3_tcp_server_stop(void) {
 
 bool sticks3_tcp_server_is_client_connected(void) {
     return s_client_connected;
+}
+
+void sticks3_tcp_server_set_ctrl_cb(ctrl_cmd_cb_t cb) {
+    s_ctrl_cb = cb;
 }

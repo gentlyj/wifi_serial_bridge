@@ -196,13 +196,7 @@ static void build_state_waiting(void) {
     lv_label_set_text(s_label_ip, s_ip_str);
     lv_obj_set_style_text_color(s_label_ip, lv_color_hex(COLOR_GREEN), 0);
     lv_obj_set_style_text_font(s_label_ip, FONT, 0);
-    lv_obj_align(s_label_ip, LV_ALIGN_TOP_MID, 0, 30);
-
-    lv_obj_t *port_lbl = lv_label_create(scr);
-    lv_label_set_text(port_lbl, ":8080");
-    lv_obj_set_style_text_color(port_lbl, lv_color_hex(COLOR_GREEN), 0);
-    lv_obj_set_style_text_font(port_lbl, FONT, 0);
-    lv_obj_align(port_lbl, LV_ALIGN_TOP_MID, 0, 55);
+    lv_obj_align(s_label_ip, LV_ALIGN_TOP_MID, 0, 40);
 
     s_label_baud = lv_label_create(scr);
     lv_label_set_text_fmt(s_label_baud, "Baud: %u", (unsigned)s_baud);
@@ -234,7 +228,7 @@ static void build_state_active(void) {
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
 
     lv_obj_t *ip_lbl = lv_label_create(scr);
-    lv_label_set_text_fmt(ip_lbl, "%s:8080", s_ip_str);
+    lv_label_set_text(ip_lbl, s_ip_str);
     lv_obj_set_style_text_color(ip_lbl, lv_color_hex(COLOR_WHITE), 0);
     lv_obj_set_style_text_font(ip_lbl, FONT, 0);
     lv_obj_align(ip_lbl, LV_ALIGN_TOP_MID, 0, 80);

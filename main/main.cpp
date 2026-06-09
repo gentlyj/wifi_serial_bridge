@@ -1,8 +1,10 @@
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_pm.h"
 #include "lvgl.h"
@@ -16,6 +18,7 @@
 #include "sticks3_wifi.h"
 #include "sticks3_provision.h"
 #include "sticks3_tcp_server.h"
+#include "sticks3_http_server.h"
 #include "sticks3_uart_bridge.h"
 #include "sticks3_ui.h"
 
@@ -80,6 +83,7 @@ static void transition_to(ui_state_t new_state) {
     // Enter new state
     switch (new_state) {
         case UI_STATE_WIFI_DISCONNECTED:
+            sticks3_http_server_stop();
             sticks3_wifi_disconnect();
             sticks3_ui_set_state(UI_STATE_WIFI_DISCONNECTED);
             sticks3_audio_play_tone(200, 300, 30);
@@ -88,7 +92,7 @@ static void transition_to(ui_state_t new_state) {
         case UI_STATE_PROVISIONING:
             sticks3_provision_start();
             sticks3_ui_set_state(UI_STATE_PROVISIONING);
-            sticks3_audio_play_tone(500, 200, 30);
+            sticks3_audio_play_tone(300, 200, 30);
             break;
 
         case UI_STATE_WIFI_WAITING: {
@@ -99,7 +103,8 @@ static void transition_to(ui_state_t new_state) {
             sticks3_ui_set_state(UI_STATE_WIFI_WAITING);
             sticks3_ui_update_baud(s_baud);
             sticks3_tcp_server_start(TCP_PORT);
-            sticks3_audio_play_tone(1000, 200, 30);
+            sticks3_http_server_start();
+            sticks3_audio_play_tone(400, 200, 30);
             break;
         }
 
@@ -109,7 +114,7 @@ static void transition_to(ui_state_t new_state) {
             sticks3_uart_bridge_start();
             sticks3_ui_set_state(UI_STATE_BRIDGE_ACTIVE);
             sticks3_ui_update_baud(s_baud);
-            sticks3_audio_play_tone(1500, 150, 30);
+            sticks3_audio_play_tone(500, 150, 30);
             break;
     }
 
@@ -129,7 +134,55 @@ static void cycle_baud_rate(void) {
     sticks3_nvs_save_baud(s_baud);
     sticks3_ui_update_baud(s_baud);
     ESP_LOGI(TAG, "Baud rate -> %u", (unsigned)s_baud);
-    sticks3_audio_play_tone(800, 100, 20);
+    sticks3_audio_play_tone(350, 100, 20);
+}
+
+// Forward declaration
+static void screen_wake(void);
+
+// Deferred reboot task (allows WS response to be sent first)
+static void deferred_reboot_task(void *arg) {
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
+
+// Control command handler (called from WS server for \x01-prefixed frames)
+static bool handle_ctrl_cmd(const char *cmd, char *resp, size_t resp_size) {
+    ESP_LOGI(TAG, "Control command: %s", cmd);
+    if (strcmp(cmd, "REBOOT") == 0) {
+        snprintf(resp, resp_size, "REBOOT");
+        xTaskCreate(deferred_reboot_task, "reboot", 2048, NULL, 5, NULL);
+        return true;
+    } else if (strcmp(cmd, "SCR_OFF") == 0) {
+        if (!s_screen_asleep) {
+            s_screen_asleep = true;
+            sticks3_display_sleep();
+            sticks3_ui_pause();
+            sticks3_button_enable_wake(button_wake_isr, NULL);
+            esp_pm_config_t pm_cfg = {
+                .max_freq_mhz = 80,
+                .min_freq_mhz = 80,
+                .light_sleep_enable = false,
+            };
+            esp_pm_configure(&pm_cfg);
+        }
+        snprintf(resp, resp_size, "SCR_OFF OK");
+        return true;
+    } else if (strcmp(cmd, "SCR_ON") == 0) {
+        screen_wake();
+        snprintf(resp, resp_size, "SCR_ON OK");
+        return true;
+    } else if (strcmp(cmd, "BATT") == 0) {
+        uint16_t mv = 0;
+        if (sticks3_power_get_battery(&mv) == ESP_OK) {
+            snprintf(resp, resp_size, "BATT %u", (unsigned)mv);
+        } else {
+            snprintf(resp, resp_size, "BATT ERR");
+        }
+        return true;
+    }
+    snprintf(resp, resp_size, "ERR unknown cmd");
+    return true;
 }
 
 static void screen_wake(void) {
@@ -227,12 +280,14 @@ static void handle_event(app_event_t event) {
             screen_wake();
             transition_to(UI_STATE_BRIDGE_ACTIVE);
             sticks3_ui_update_ws_connected(true);
+            sticks3_http_server_set_ws_connected(true);
             break;
 
         case APP_EVENT_TCP_CLIENT_DISCONNECTED:
             ESP_LOGI(TAG, "TCP client disconnected");
             screen_wake();
             sticks3_ui_update_ws_connected(false);
+            sticks3_http_server_set_ws_connected(false);
             transition_to(UI_STATE_WIFI_WAITING);
             break;
     }
@@ -284,8 +339,11 @@ static void idle_monitor_task(void *arg) {
             sticks3_power_is_charging(&charging);
             if (!charging && mv < LOW_BATTERY_MV) {
                 ESP_LOGW(TAG, "Low battery shutdown: %u mV", mv);
-                sticks3_audio_play_tone(300, 500, 50);
-                vTaskDelay(pdMS_TO_TICKS(500));
+                for (int i = 0; i < 3; i++) {
+                    sticks3_audio_play_tone(250, 150, 40);
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                }
+                vTaskDelay(pdMS_TO_TICKS(300));
                 sticks3_power_shutdown();
                 vTaskDelay(pdMS_TO_TICKS(1000)); // Should not reach here
             }
@@ -301,6 +359,11 @@ static void idle_monitor_task(void *arg) {
                 s_last_tx_bytes = tx;
             } else if ((now - s_last_fwd_change_tick) > IDLE_SHUTDOWN_TICKS) {
                 ESP_LOGW(TAG, "Idle shutdown: no data forwarded for 5 min");
+                for (int i = 0; i < 3; i++) {
+                    sticks3_audio_play_tone(250, 150, 40);
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                }
+                vTaskDelay(pdMS_TO_TICKS(300));
                 sticks3_power_shutdown();
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
@@ -358,6 +421,9 @@ extern "C" void app_main(void) {
 
     // UI init
     sticks3_ui_init(s_app_event_queue);
+
+    // Register control command handler for WS protocol
+    sticks3_tcp_server_set_ctrl_cb(handle_ctrl_cmd);
 
     // Check if there are saved WiFi credentials
     wifi_config_t saved_cfg = {0};

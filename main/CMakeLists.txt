@@ -1,4 +1,4 @@
-idf_component_register(SRCS "main.cpp"
+idf_component_register(SRCS "sticks3_http_server.c" "main.cpp"
                              "sticks3_power.cpp"
                              "sticks3_display.c"
                              "sticks3_button.c"
