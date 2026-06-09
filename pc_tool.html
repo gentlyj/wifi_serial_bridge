@@ -168,6 +168,7 @@ body {
     }
     .toolbar button { padding: 6px 12px; font-size: 13px; }
     .pin-hint { display: none; }
+    #scrollHint { display: none; }
 
     .ctrl-group .ctrl-sep { display: none; }
     .ctrl-btn { padding: 4px 8px !important; font-size: 12px !important; }
@@ -213,7 +214,8 @@ body {
 
 <div class="toolbar">
     <label><input type="checkbox" id="chkHex"> Hex</label>
-    <label><input type="checkbox" id="chkAutoScroll" checked onchange="syncScroll(this.checked)"> Scroll</label>
+    <label title="Middle-click display area to toggle"><input type="checkbox" id="chkAutoScroll" checked onchange="syncScroll(this.checked)"> Scroll</label>
+    <span style="color:#666;font-size:11px" id="scrollHint">[mid-click toggle]</span>
     <label><input type="checkbox" id="chkTimestamp"> TS</label>
     <button onclick="clearDisplay()">Clear</button>
     <div class="ctrl-group" id="ctrlGroup" style="display:none">
@@ -470,6 +472,16 @@ function syncScroll(checked) {
     document.getElementById('chkAutoScroll').checked = checked;
     document.getElementById('chkAutoScroll2').checked = checked;
 }
+
+// Middle mouse button toggles scroll
+document.getElementById('display').addEventListener('mousedown', function(e) {
+    if (e.button === 1) {
+        e.preventDefault();
+        var chk = document.getElementById('chkAutoScroll');
+        chk.checked = !chk.checked;
+        syncScroll(chk.checked);
+    }
+});
 
 setInterval(function() { flushRxBuffer(); updateLeds(); }, 50);
 
