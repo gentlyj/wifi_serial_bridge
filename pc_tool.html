@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>StickS3 Serial Bridge</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -52,16 +53,41 @@ body {
     border-bottom: 1px solid #0f3460; font-size: 12px;
     flex-wrap: wrap;
 }
-.toolbar label {
-    color: #aaa; display: flex; align-items: center; gap: 4px;
-    white-space: nowrap;
-}
 .toolbar button {
     padding: 3px 10px; background: #0f3460; border: 1px solid #533483;
     color: #eee; border-radius: 3px; cursor: pointer; font-family: inherit;
     font-size: 12px;
 }
+.toolbar label {
+    color: #aaa; display: inline-flex; align-items: center; gap: 4px;
+    white-space: nowrap;
+}
+.toolbar select {
+    background: #0f3460; border: 1px solid #533483; color: #eee;
+    border-radius: 3px; padding: 3px 6px; font-family: inherit; font-size: 12px;
+}
 .toolbar .spacer { flex: 1; min-width: 0; }
+
+.footbar {
+    background: #16213e; padding: 6px 16px; display: grid;
+    grid-template-columns: auto 1fr; align-items: start; gap: 8px; flex-shrink: 0;
+    border-top: 1px solid #0f3460; font-size: 12px;
+}
+.footbar label {
+    color: #aaa; display: inline-flex; align-items: center; gap: 4px;
+    white-space: nowrap;
+}
+.footbar button {
+    padding: 4px 12px; background: #0f3460; border: 1px solid #533483;
+    color: #eee; border-radius: 3px; cursor: pointer; font-family: inherit;
+    font-size: 12px;
+}
+.macro-grid {
+    display: flex; flex-wrap: wrap; gap: 6px;
+}
+.macro-add {
+    color: #4caf50 !important;
+}
 
 .ctrl-group {
     display: flex; align-items: center; gap: 6px;
@@ -102,50 +128,14 @@ body {
 .led-label { color: #aaa; }
 .pin-hint { color: #666; font-size: 11px; }
 
-.display-area {
-    flex: 1; overflow-y: auto; padding: 8px 16px;
-    font-size: 13px; line-height: 1.5; white-space: pre-wrap;
-    word-break: break-all; background: #0d0d1a;
-    -webkit-overflow-scrolling: touch;
+#terminal {
+    flex: 1; min-height: 0;
 }
-.display-area .rx { color: #00ffff; }
-.display-area .tx { color: #ffff00; }
-.display-area .sys { color: #888; font-style: italic; }
-.display-area .ctrl { color: #e94560; }
-.display-area .ts { color: #7f8c8d; }
-
-.send-bar {
-    background: #16213e; padding: 8px 16px; display: flex;
-    gap: 8px; flex-shrink: 0; border-top: 1px solid #0f3460;
+#terminal .xterm {
+    height: 100%;
 }
-.send-bar input {
-    flex: 1; background: #0f3460; border: 1px solid #533483;
-    color: #eee; padding: 8px 10px; font-family: inherit;
-    font-size: 14px; border-radius: 3px; min-width: 0;
-}
-.send-bar input:focus { outline: none; border-color: #e94560; }
-.send-bar button {
-    padding: 8px 20px; background: #0f3460; border: 1px solid #533483;
-    color: #eee; border-radius: 3px; cursor: pointer;
-    font-family: inherit; font-size: 14px; white-space: nowrap; flex-shrink: 0;
-}
-.line-end {
-    display: flex; align-items: center; gap: 4px; font-size: 12px;
-    color: #aaa; flex-shrink: 0;
-}
-.line-end select {
-    background: #0f3460; border: 1px solid #533483; color: #eee;
-    padding: 4px; border-radius: 3px; font-family: inherit; font-size: 12px;
-}
-.toolbar-bottom {
-    background: #16213e; padding: 6px 16px; display: flex;
-    align-items: center; gap: 10px; flex-shrink: 0;
-    border-top: 1px solid #0f3460; font-size: 12px;
-}
-.toolbar-bottom button {
-    padding: 3px 10px; background: #0f3460; border: 1px solid #533483;
-    color: #eee; border-radius: 3px; cursor: pointer; font-family: inherit;
-    font-size: 12px;
+#terminal .xterm-viewport {
+    height: 100% !important;
 }
 
 /* ---- Mobile ---- */
@@ -162,37 +152,12 @@ body {
     .conn-bar button { padding: 10px 18px; font-size: 14px; }
 
     .toolbar { padding: 6px 12px; gap: 8px; }
-    .toolbar label { font-size: 13px; }
-    .toolbar label input[type="checkbox"] {
-        width: 18px; height: 18px; accent-color: #e94560;
-    }
     .toolbar button { padding: 6px 12px; font-size: 13px; }
+    .footbar { padding: 6px 12px; grid-template-columns: 1fr; gap: 6px; }
     .pin-hint { display: none; }
-    #scrollHint { display: none; }
 
     .ctrl-group .ctrl-sep { display: none; }
     .ctrl-btn { padding: 4px 8px !important; font-size: 12px !important; }
-
-    .display-area {
-        padding: 6px 12px; font-size: 12px; line-height: 1.4;
-    }
-
-    .send-bar {
-        padding: 8px 12px; gap: 6px;
-    }
-    .send-bar input {
-        font-size: 16px; padding: 10px 12px;
-    }
-    .send-bar button {
-        padding: 10px 16px; font-size: 14px;
-    }
-    .line-end select { font-size: 13px; padding: 6px; }
-    .toolbar-bottom { padding: 6px 12px; }
-    .toolbar-bottom label { font-size: 13px; }
-    .toolbar-bottom label input[type="checkbox"] {
-        width: 18px; height: 18px; accent-color: #e94560;
-    }
-    .toolbar-bottom button { padding: 6px 12px; font-size: 13px; }
 }
 </style>
 </head>
@@ -213,18 +178,21 @@ body {
 </div>
 
 <div class="toolbar">
-    <label><input type="checkbox" id="chkHex"> Hex</label>
-    <label title="Middle-click display area to toggle"><input type="checkbox" id="chkAutoScroll" checked onchange="syncScroll(this.checked)"> Scroll</label>
-    <span style="color:#666;font-size:11px" id="scrollHint">[mid-click toggle]</span>
+    <button onclick="clearTerminal()">Clear</button>
+    <label>Baud
+        <select id="baudSelect" onchange="setBaud(this.value)">
+            <option value="115200">115200</option>
+            <option value="230400">230400</option>
+            <option value="460800">460800</option>
+            <option value="921600">921600</option>
+            <option value="1000000">1000000</option>
+            <option value="1500000">1500000</option>
+            <option value="2000000">2000000</option>
+        </select>
+    </label>
     <label><input type="checkbox" id="chkTimestamp"> TS</label>
-    <button onclick="clearDisplay()">Clear</button>
-    <div class="ctrl-group" id="ctrlGroup" style="display:none">
-        <span class="ctrl-sep"></span>
-        <button class="ctrl-btn" onclick="sendCmd('REBOOT')" id="btnReboot">Reboot</button>
-        <button class="ctrl-btn" onclick="sendCmd('SCR_OFF')" id="btnScrOff">Screen Off</button>
-        <button class="ctrl-btn" onclick="sendCmd('SCR_ON')" id="btnScrOn">Screen On</button>
-        <span class="batt-display" id="battDisplay" style="display:none"><span class="batt-icon" id="battIcon"></span><span id="battText">--</span></span>
-    </div>
+    <label><input type="checkbox" id="chkAutoScroll" checked onchange="setAutoScroll(this.checked)"> Scroll</label>
+    <span class="batt-display" id="battDisplay"><span id="battText">--</span></span>
     <span class="spacer"></span>
     <div class="led-group">
         <div class="led-item">
@@ -239,34 +207,89 @@ body {
     </div>
 </div>
 
-<div class="display-area" id="display"></div>
-<div class="toolbar-bottom">
-    <label><input type="checkbox" id="chkAutoScroll2" checked onchange="syncScroll(this.checked)"> Scroll</label>
-    <button onclick="clearDisplay()">Clear</button>
-</div>
-<div class="send-bar">
-    <input id="inputSend" type="text" placeholder="Send data..."
-           inputmode="text" enterkeyhint="send"
-           onkeydown="if(event.key==='Enter')doSend()">
-    <div class="line-end">
-        <select id="selLineEnd">
-            <option value="none">None</option>
-            <option value="lf" selected>LF</option>
-            <option value="cr">CR</option>
-            <option value="crlf">CRLF</option>
-        </select>
-    </div>
-    <button onclick="doSend()">Send</button>
+<div id="terminal"></div>
+
+<div class="footbar">
+    <label>Macro</label>
+    <div class="macro-grid" id="macroButtons"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script>
 let ws = null;
-let rxChunks = [];
 let rxActiveUntil = 0;
 let txActiveUntil = 0;
-let battTimer = null;
-let battFailCount = 0;
+let macros = [];
+let autoScroll = true;
+const defaultMacros = [
+    { name: 'kmsg off', data: 'echo 0 > /proc/sys/kernel/printk\\r' },
+    { name: 'reboot loader', data: 'reboot loader\\r' },
+    { name: 'dmesg', data: 'dmesg -w\\r' },
+    { name: 'ifconfig', data: 'ifconfig\\r' },
+];
 
+// ─── xterm.js setup ───
+const term = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+    theme: {
+        background: '#0d0d1a',
+        foreground: '#eeeeee',
+        cursor: '#e94560',
+        selectionBackground: '#264f78',
+    },
+    scrollback: 5000,
+});
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(document.getElementById('terminal'));
+function fitTerminal() {
+    try {
+        fitAddon.fit();
+    } catch (e) {}
+}
+fitTerminal();
+window.addEventListener('resize', fitTerminal);
+setTimeout(fitTerminal, 0);
+setTimeout(fitTerminal, 250);
+
+// Send keystrokes directly to serial
+term.onData(function(data) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(new TextEncoder().encode(data).buffer);
+    flashTx();
+});
+
+term.write('\x1b[36mStickS3 Serial Bridge\x1b[0m\r\n');
+
+function focusTerminal() {
+    term.focus();
+}
+
+function clearTerminal() {
+    term.clear();
+    focusTerminal();
+}
+
+function setAutoScroll(enabled) {
+    autoScroll = enabled;
+    const chk = document.getElementById('chkAutoScroll');
+    if (chk) chk.checked = autoScroll;
+    if (autoScroll) term.scrollToBottom();
+}
+
+document.getElementById('terminal').addEventListener('mousedown', function(e) {
+    if (e.button === 1) {
+        e.preventDefault();
+        setAutoScroll(!autoScroll);
+        term.write('\r\n\x1b[36mAuto scroll ' + (autoScroll ? 'ON' : 'OFF') + '\x1b[0m\r\n');
+        focusTerminal();
+    }
+});
+
+// ─── LED indicators ───
 function flashRx() {
     rxActiveUntil = Date.now() + 1000;
     document.getElementById('ledRx').classList.add('active');
@@ -275,71 +298,19 @@ function flashTx() {
     txActiveUntil = Date.now() + 1000;
     document.getElementById('ledTx').classList.add('active');
 }
-function updateLeds() {
+setInterval(function() {
     const now = Date.now();
     if (now > rxActiveUntil) document.getElementById('ledRx').classList.remove('active');
     if (now > txActiveUntil) document.getElementById('ledTx').classList.remove('active');
-}
+}, 50);
 
-function formatTimestamp() {
-    const d = new Date();
-    const h = String(d.getHours()).padStart(2, '0');
-    const m = String(d.getMinutes()).padStart(2, '0');
-    const s = String(d.getSeconds()).padStart(2, '0');
-    const ms = String(d.getMilliseconds()).padStart(3, '0');
-    return h + ':' + m + ':' + s + '.' + ms;
-}
-
-function log(cls, text) {
-    const el = document.getElementById('display');
-    if (document.getElementById('chkTimestamp').checked) {
-        const tsSpan = document.createElement('span');
-        tsSpan.className = 'ts';
-        tsSpan.textContent = '[' + formatTimestamp() + '] ';
-        el.appendChild(tsSpan);
-    }
-    const span = document.createElement('span');
-    span.className = cls;
-    span.textContent = text + '\n';
-    el.appendChild(span);
-    while (el.children.length > 5000) el.removeChild(el.firstChild);
-    if (document.getElementById('chkAutoScroll').checked) {
-        el.scrollTop = el.scrollHeight;
-    }
-}
-
+// ─── Status ───
 function setStatus(state, text) {
     document.getElementById('statusDot').className = 'status ' + state;
     document.getElementById('statusText').textContent = text;
-    document.getElementById('ctrlGroup').style.display = state === 'connected' ? 'flex' : 'none';
 }
 
-function formatHex(buf) {
-    const bytes = new Uint8Array(buf);
-    let hex = '';
-    for (let i = 0; i < bytes.length; i++) {
-        hex += bytes[i].toString(16).padStart(2, '0') + ' ';
-    }
-    return hex.trim();
-}
-
-function flushRxBuffer() {
-    if (rxChunks.length === 0) return;
-    const totalLen = rxChunks.reduce((s, c) => s + c.byteLength, 0);
-    const merged = new Uint8Array(totalLen);
-    let off = 0;
-    for (const chunk of rxChunks) {
-        merged.set(new Uint8Array(chunk), off);
-        off += chunk.byteLength;
-    }
-    rxChunks = [];
-    if (document.getElementById('chkHex').checked) {
-        log('rx', 'RX: ' + formatHex(merged.buffer));
-    } else {
-        log('rx', 'RX: ' + new TextDecoder('utf-8', {fatal: false}).decode(merged.buffer));
-    }
-}
-
+// ─── Battery ───
 function updateBattDisplay(mv) {
     const el = document.getElementById('battDisplay');
     const txt = document.getElementById('battText');
@@ -379,61 +350,278 @@ function handleBattResp(resp) {
     }
     battFailCount++;
     if (battFailCount >= 2) {
-        log('sys', 'Battery query failed, connection may be lost');
+        term.write('\r\n\x1b[31mBattery query failed, connection may be lost\x1b[0m\r\n');
         doDisconnect();
     }
 }
+
+// ─── Control protocol ───
+function sendCmd(cmd) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(String.fromCharCode(1) + cmd);
+}
+
+// ─── WebSocket ───
+function apiBase() {
+    return window.location.origin && window.location.protocol.startsWith('http')
+        ? window.location.origin
+        : 'http://' + document.getElementById('inputHost').value.replace(/^ws:\/\//, '').replace(/:8080.*$/, '');
+}
+
+function updateBattDisplay(mv, charging) {
+    const el = document.getElementById('battDisplay');
+    const txt = document.getElementById('battText');
+    el.style.display = 'inline-flex';
+    txt.textContent = (charging ? 'CHG ' : '') + (mv / 1000).toFixed(2) + 'V';
+    if (mv >= 3700) el.style.color = '#4caf50';
+    else if (mv >= 3500) el.style.color = '#ff9800';
+    else el.style.color = '#f44336';
+}
+
+async function refreshStatus() {
+    try {
+        const resp = await fetch(apiBase() + '/api/status', { cache: 'no-store' });
+        const data = await resp.json();
+        if (!data.ok) return;
+        if (data.baud) document.getElementById('baudSelect').value = String(data.baud);
+        if (data.batt_ok) updateBattDisplay(data.batt_mv, data.charging);
+    } catch (e) {}
+}
+
+async function setBaud(value) {
+    try {
+        const resp = await fetch(apiBase() + '/api/baud?value=' + encodeURIComponent(value), { cache: 'no-store' });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'failed');
+        document.getElementById('baudSelect').value = String(data.baud);
+        term.write('\r\n\x1b[36mBaud set to ' + data.baud + '\x1b[0m\r\n');
+    } catch (e) {
+        term.write('\r\n\x1b[31mSet baud failed\x1b[0m\r\n');
+        refreshStatus();
+    }
+}
+
+function renderMacros() {
+    const box = document.getElementById('macroButtons');
+    box.innerHTML = '';
+    if (macros.length === 0) {
+        macros = defaultMacros.slice();
+    }
+    macros.forEach(function(m, idx) {
+        const btn = document.createElement('button');
+        btn.textContent = m.name || ('Macro ' + (idx + 1));
+        btn.title = 'Left click: run, right click: edit';
+        btn.onclick = function() { runMacro(idx); };
+        btn.oncontextmenu = function(e) {
+            e.preventDefault();
+            editMacro(idx);
+        };
+        box.appendChild(btn);
+    });
+
+    const add = document.createElement('button');
+    add.className = 'macro-add';
+    add.textContent = '+';
+    add.title = 'Add macro';
+    add.onclick = function() { editMacro(-1); };
+    box.appendChild(add);
+}
+
+async function loadMacros() {
+    try {
+        const resp = await fetch(apiBase() + '/api/macros', { cache: 'no-store' });
+        const data = await resp.json();
+        macros = Array.isArray(data.macros) ? data.macros : [];
+        renderMacros();
+    } catch (e) {
+        macros = [];
+        renderMacros();
+    }
+}
+
+async function saveMacros() {
+    const resp = await fetch(apiBase() + '/api/macros', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(macros)
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'save_failed');
+}
+
+function encodeMacroData(text) {
+    return text
+        .replace(/\\/g, '\\\\')
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n')
+        .replace(/\t/g, '\\t');
+}
+
+function decodeMacroData(text) {
+    return text.replace(/\\x([0-9a-fA-F]{2})|\\r|\\n|\\t|\\\\/g, function(m, hex) {
+        if (hex) return String.fromCharCode(parseInt(hex, 16));
+        if (m === '\\r') return '\r';
+        if (m === '\\n') return '\n';
+        if (m === '\\t') return '\t';
+        return '\\';
+    });
+}
+
+function runMacro(index) {
+    const macro = macros[index];
+    if (!macro || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const data = decodeMacroData(macro.data || '');
+    ws.send(new TextEncoder().encode(data).buffer);
+    flashTx();
+}
+
+async function editMacro(index) {
+    const old = index >= 0 ? macros[index] : { name: '', data: '' };
+    const text = prompt('Edit macro: name=command. Escapes: \\r \\n \\t \\x03',
+        (old.name || '') + '=' + encodeMacroData(old.data || ''));
+    if (text === null) return;
+
+    const line = text.trim();
+    if (!line && index >= 0) {
+        macros.splice(index, 1);
+    } else {
+        const eq = line.indexOf('=');
+        if (eq <= 0) return;
+        const name = line.slice(0, eq).trim().slice(0, 24);
+        const data = line.slice(eq + 1).slice(0, 160);
+        if (!name) return;
+        if (index >= 0) macros[index] = { name: name, data: data };
+        else macros.push({ name: name, data: data });
+    }
+
+    macros = macros.slice(0, 24);
+    renderMacros();
+    try {
+        await saveMacros();
+        term.write('\r\n\x1b[36mMacros saved\x1b[0m\r\n');
+    } catch (e) {
+        term.write('\r\n\x1b[31mSave macros failed\x1b[0m\r\n');
+        loadMacros();
+    }
+}
+
+async function editMacros() {
+    const current = macros.map(function(m) {
+        return (m.name || '') + '=' + encodeMacroData(m.data || '');
+    }).join('\n');
+    const text = prompt('Edit macros, one per line: name=command. Escapes: \\r \\n \\t \\x03', current);
+    if (text === null) return;
+
+    const next = [];
+    text.split(/\r?\n/).forEach(function(line) {
+        line = line.trim();
+        if (!line) return;
+        const eq = line.indexOf('=');
+        if (eq <= 0) return;
+        const name = line.slice(0, eq).trim().slice(0, 24);
+        const data = line.slice(eq + 1).slice(0, 160);
+        if (name) next.push({ name: name, data: data });
+    });
+    macros = next.slice(0, 24);
+    renderMacros();
+    try {
+        await saveMacros();
+        term.write('\r\n\x1b[36mMacros saved\x1b[0m\r\n');
+    } catch (e) {
+        term.write('\r\n\x1b[31mSave macros failed\x1b[0m\r\n');
+        loadMacros();
+    }
+}
+
+const rxDecoder = new TextDecoder();
+let rxLineStart = true;
+
+function timestampText() {
+    const d = new Date();
+    return '[' +
+        String(d.getHours()).padStart(2, '0') + ':' +
+        String(d.getMinutes()).padStart(2, '0') + ':' +
+        String(d.getSeconds()).padStart(2, '0') + '.' +
+        String(d.getMilliseconds()).padStart(3, '0') + '] ';
+}
+
+function writeRxData(bytesOrText) {
+    if (!document.getElementById('chkTimestamp').checked) {
+        term.write(bytesOrText);
+        if (autoScroll) term.scrollToBottom();
+        return;
+    }
+
+    const text = typeof bytesOrText === 'string' ? bytesOrText : rxDecoder.decode(bytesOrText, { stream: true });
+    let out = '';
+    for (let i = 0; i < text.length; i++) {
+        if (rxLineStart && text[i] !== '\r' && text[i] !== '\n') {
+            out += timestampText();
+            rxLineStart = false;
+        }
+        out += text[i];
+        if (text[i] === '\n') rxLineStart = true;
+    }
+    term.write(out);
+    if (autoScroll) term.scrollToBottom();
+}
+
 function doConnect() {
     const url = document.getElementById('inputHost').value.trim();
     if (!url) return;
     if (ws) doDisconnect();
     setStatus('connecting', 'Connecting...');
-    log('sys', 'Connecting to ' + url + '...');
+    term.write('\x1b[33mConnecting to ' + url + '...\x1b[0m\r\n');
     try {
         ws = new WebSocket(url);
         ws.binaryType = 'arraybuffer';
     } catch(e) {
         setStatus('', 'Disconnected');
-        log('sys', 'Invalid URL: ' + e.message);
+        term.write('\x1b[31mInvalid URL: ' + e.message + '\x1b[0m\r\n');
         return;
     }
     ws.onopen = function() {
         setStatus('connected', 'Connected');
-        log('sys', 'Connected to ' + url);
+        term.write('\x1b[32mConnected\x1b[0m\r\n');
         document.getElementById('btnConnect').style.display = 'none';
         document.getElementById('btnDisconnect').style.display = 'inline-block';
-        startBattPolling();
+        fitTerminal();
+        refreshStatus();
     };
     ws.onmessage = function(evt) {
         if (evt.data instanceof ArrayBuffer) {
-            // Check for \x01 control protocol prefix
             const bytes = new Uint8Array(evt.data);
-            if (bytes.length > 1 && bytes[0] === 0x01) {
+            if (false) {
+                // Control protocol response
                 const resp = new TextDecoder().decode(evt.data.slice(1));
                 if (resp.startsWith('BATT ')) { handleBattResp(resp); }
-                else { log('ctrl', 'CMD: ' + resp); }
+                else { term.write('\x1b[35m[CMD] ' + resp + '\x1b[0m\r\n'); }
             } else {
-                flashRx(); rxChunks.push(evt.data);
+                // Serial data → terminal
+                flashRx();
+                writeRxData(bytes);
             }
         } else {
-            // Text frame - check for \x01 prefix
             const txt = evt.data;
-            if (txt.charCodeAt(0) === 1) {
+            if (false) {
                 const resp = txt.slice(1);
                 if (resp.startsWith('BATT ')) { handleBattResp(resp); }
-                else { log('ctrl', 'CMD: ' + resp); }
+                else { term.write('\x1b[35m[CMD] ' + resp + '\x1b[0m\r\n'); }
+            } else {
+                flashRx();
+                writeRxData(txt);
             }
         }
     };
     ws.onclose = function() {
-        stopBattPolling();
         setStatus('', 'Disconnected');
-        log('sys', 'Connection closed');
+        term.write('\x1b[31mConnection closed\x1b[0m\r\n');
         ws = null;
         document.getElementById('btnConnect').style.display = '';
         document.getElementById('btnDisconnect').style.display = 'none';
+        fitTerminal();
     };
-    ws.onerror = function() { log('sys', 'WebSocket error'); };
+    ws.onerror = function() { term.write('\x1b[31mWebSocket error\x1b[0m\r\n'); };
 }
 
 function doDisconnect() {
@@ -443,54 +631,15 @@ function doDisconnect() {
     document.getElementById('btnDisconnect').style.display = 'none';
 }
 
-function doSend() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) { log('sys', 'Not connected'); return; }
-    const input = document.getElementById('inputSend');
-    let data = input.value;
-    if (!data) return;
-    const le = document.getElementById('selLineEnd').value;
-    if (le === 'lf') data += '\n';
-    else if (le === 'cr') data += '\r';
-    else if (le === 'crlf') data += '\r\n';
-    ws.send(new TextEncoder().encode(data).buffer);
-    flashTx();
-    log('tx', 'TX: ' + data);
-    input.value = '';
-}
-
-function sendCmd(cmd) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) { log('sys', 'Not connected'); return; }
-    // Control protocol: \x01 prefix + command string
-    ws.send(String.fromCharCode(1) + cmd);
-    log('ctrl', 'CMD: ' + cmd);
-}
-
-function clearDisplay() {
-    document.getElementById('display').innerHTML = '';
-}
-function syncScroll(checked) {
-    document.getElementById('chkAutoScroll').checked = checked;
-    document.getElementById('chkAutoScroll2').checked = checked;
-}
-
-// Middle mouse button toggles scroll
-document.getElementById('display').addEventListener('mousedown', function(e) {
-    if (e.button === 1) {
-        e.preventDefault();
-        var chk = document.getElementById('chkAutoScroll');
-        chk.checked = !chk.checked;
-        syncScroll(chk.checked);
-    }
-});
-
-setInterval(function() { flushRxBuffer(); updateLeds(); }, 50);
-
-// Auto-detect host IP for WebSocket URL
+// Auto-detect host IP
 if (window.location.hostname && window.location.hostname !== 'localhost') {
     document.getElementById('inputHost').value = 'ws://' + window.location.hostname + ':8080';
 }
 
-// Auto-connect on page load
+// Auto-connect
+refreshStatus();
+loadMacros();
+setInterval(refreshStatus, 10000);
 doConnect();
 </script>
 </body>

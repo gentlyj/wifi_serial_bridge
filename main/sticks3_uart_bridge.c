@@ -3,6 +3,7 @@
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <string.h>
 
@@ -15,9 +16,10 @@ static const char *TAG = "sticks3_uart";
 
 static TaskHandle_t s_rx_task = NULL;
 static TaskHandle_t s_tx_task = NULL;
+static SemaphoreHandle_t s_uart_mutex = NULL;
 static bool s_running = false;
 static bool s_initialized = false;
-static uint32_t s_current_baud = 1000000;
+static uint32_t s_current_baud = 1500000;
 static gpio_num_t s_tx_pin, s_rx_pin;
 static uint64_t s_rx_bytes = 0;
 static uint64_t s_tx_bytes = 0;
@@ -54,7 +56,11 @@ static void uart_tx_task(void *arg) {
         size_t len = xStreamBufferReceive(tcp_to_uart_buf, buf, sizeof(buf),
                                           pdMS_TO_TICKS(100));
         if (len > 0) {
-            int written = uart_write_bytes(UART_NUM, buf, len);
+            int written = -1;
+            if (s_uart_mutex && xSemaphoreTake(s_uart_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+                written = uart_write_bytes(UART_NUM, buf, len);
+                xSemaphoreGive(s_uart_mutex);
+            }
             if (written > 0) {
                 s_tx_bytes += written;
             }
@@ -68,6 +74,14 @@ static void uart_tx_task(void *arg) {
 
 esp_err_t sticks3_uart_bridge_init(gpio_num_t tx_pin, gpio_num_t rx_pin) {
     if (s_initialized) return ESP_OK;
+
+    if (!s_uart_mutex) {
+        s_uart_mutex = xSemaphoreCreateMutex();
+        if (!s_uart_mutex) {
+            ESP_LOGE(TAG, "Create UART mutex failed");
+            return ESP_ERR_NO_MEM;
+        }
+    }
 
     s_tx_pin = tx_pin;
     s_rx_pin = rx_pin;
@@ -93,14 +107,38 @@ esp_err_t sticks3_uart_bridge_init(gpio_num_t tx_pin, gpio_num_t rx_pin) {
 }
 
 esp_err_t sticks3_uart_bridge_set_baud(uint32_t baud_rate) {
-    s_current_baud = baud_rate;
-    if (s_initialized) {
-        esp_err_t ret = uart_set_baudrate(UART_NUM, baud_rate);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Set baudrate failed: %s", esp_err_to_name(ret));
-            return ret;
-        }
+    if (!s_initialized) {
+        s_current_baud = baud_rate;
+        ESP_LOGI(TAG, "Baud rate pending init: %u", (unsigned)baud_rate);
+        return ESP_OK;
     }
+
+    if (!s_uart_mutex || xSemaphoreTake(s_uart_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        ESP_LOGE(TAG, "Set baudrate failed: UART busy");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (s_running) {
+        if (tcp_to_uart_buf) xStreamBufferReset(tcp_to_uart_buf);
+        if (uart_to_tcp_buf) xStreamBufferReset(uart_to_tcp_buf);
+    }
+
+    uart_wait_tx_done(UART_NUM, pdMS_TO_TICKS(100));
+    uart_flush_input(UART_NUM);
+
+    esp_err_t ret = uart_set_baudrate(UART_NUM, baud_rate);
+    if (ret == ESP_OK) {
+        s_current_baud = baud_rate;
+        uart_flush_input(UART_NUM);
+    }
+
+    xSemaphoreGive(s_uart_mutex);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Set baudrate failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     ESP_LOGI(TAG, "Baud rate set to %u", (unsigned)baud_rate);
     return ESP_OK;
 }

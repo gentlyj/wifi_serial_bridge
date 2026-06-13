@@ -22,7 +22,7 @@ static lv_obj_t *s_dot_indicator;
 
 // Cached values
 static char s_ip_str[32] = "0.0.0.0";
-static uint32_t s_baud = 1000000;
+static uint32_t s_baud = 1500000;
 
 #define FONT  &lv_font_montserrat_14
 

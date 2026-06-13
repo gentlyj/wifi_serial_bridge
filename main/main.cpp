@@ -30,7 +30,7 @@ static const char *TAG = "MAIN";
 
 static QueueHandle_t s_app_event_queue;
 static ui_state_t s_current_state = UI_STATE_WIFI_DISCONNECTED;
-static uint32_t s_baud = 1000000;
+static uint32_t s_baud = 1500000;
 
 // Power management state
 static bool s_screen_asleep = false;
@@ -44,7 +44,9 @@ static uint64_t s_last_tx_bytes = 0;
 #define SCREEN_OFF_TICKS     pdMS_TO_TICKS(20UL * 1000)       // 20 seconds
 #define LOW_BATTERY_MV       3400
 
-static const uint32_t BAUD_RATES[] = { 1000000, 1500000 };
+static const uint32_t BAUD_RATES[] = {
+    115200, 230400, 460800, 921600, 1000000, 1500000, 2000000
+};
 static const int BAUD_COUNT = sizeof(BAUD_RATES) / sizeof(BAUD_RATES[0]);
 
 // ISR callback: send wake event from GPIO interrupt
@@ -110,7 +112,9 @@ static void transition_to(ui_state_t new_state) {
 
         case UI_STATE_BRIDGE_ACTIVE:
             sticks3_uart_bridge_init(UART_TX_PIN, UART_RX_PIN);
-            sticks3_uart_bridge_set_baud(s_baud);
+            if (sticks3_uart_bridge_set_baud(s_baud) != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to apply baud on bridge start: %u", (unsigned)s_baud);
+            }
             sticks3_uart_bridge_start();
             sticks3_ui_set_state(UI_STATE_BRIDGE_ACTIVE);
             sticks3_ui_update_baud(s_baud);
@@ -129,12 +133,44 @@ static void cycle_baud_rate(void) {
             break;
         }
     }
-    s_baud = BAUD_RATES[idx];
-    sticks3_uart_bridge_set_baud(s_baud);
+    uint32_t next_baud = BAUD_RATES[idx];
+    if (sticks3_uart_bridge_set_baud(next_baud) != ESP_OK) {
+        ESP_LOGW(TAG, "Baud change failed: %u", (unsigned)next_baud);
+        return;
+    }
+    s_baud = next_baud;
     sticks3_nvs_save_baud(s_baud);
     sticks3_ui_update_baud(s_baud);
     ESP_LOGI(TAG, "Baud rate -> %u", (unsigned)s_baud);
     sticks3_audio_play_tone(350, 100, 20);
+}
+
+static bool is_supported_baud(uint32_t baud) {
+    for (int i = 0; i < BAUD_COUNT; i++) {
+        if (BAUD_RATES[i] == baud) return true;
+    }
+    return false;
+}
+
+static uint32_t http_get_baud(void) {
+    return s_baud;
+}
+
+static bool http_set_baud(uint32_t baud) {
+    if (!is_supported_baud(baud)) {
+        ESP_LOGW(TAG, "HTTP rejected unsupported baud: %u", (unsigned)baud);
+        return false;
+    }
+
+    if (sticks3_uart_bridge_set_baud(baud) != ESP_OK) {
+        ESP_LOGW(TAG, "HTTP baud change failed: %u", (unsigned)baud);
+        return false;
+    }
+    s_baud = baud;
+    sticks3_nvs_save_baud(s_baud);
+    sticks3_ui_update_baud(s_baud);
+    ESP_LOGI(TAG, "HTTP baud rate -> %u", (unsigned)s_baud);
+    return true;
 }
 
 // Forward declaration
@@ -179,6 +215,14 @@ static bool handle_ctrl_cmd(const char *cmd, char *resp, size_t resp_size) {
         } else {
             snprintf(resp, resp_size, "BATT ERR");
         }
+        return true;
+    } else if (strcmp(cmd, "DIAG_ON") == 0) {
+        sticks3_tcp_server_set_diag(true);
+        snprintf(resp, resp_size, "DIAG ON");
+        return true;
+    } else if (strcmp(cmd, "DIAG_OFF") == 0) {
+        sticks3_tcp_server_set_diag(false);
+        snprintf(resp, resp_size, "DIAG OFF");
         return true;
     }
     snprintf(resp, resp_size, "ERR unknown cmd");
@@ -424,6 +468,7 @@ extern "C" void app_main(void) {
 
     // Register control command handler for WS protocol
     sticks3_tcp_server_set_ctrl_cb(handle_ctrl_cmd);
+    sticks3_http_server_set_baud_cbs(http_get_baud, http_set_baud);
 
     // Check if there are saved WiFi credentials
     wifi_config_t saved_cfg = {0};

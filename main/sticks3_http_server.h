@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +25,15 @@ esp_err_t sticks3_http_server_stop(void);
  *        Called by main to keep HTTP server state in sync.
  */
 void sticks3_http_server_set_ws_connected(bool connected);
+
+typedef uint32_t (*sticks3_http_get_baud_cb_t)(void);
+typedef bool (*sticks3_http_set_baud_cb_t)(uint32_t baud);
+
+/**
+ * @brief Register baud rate callbacks used by HTTP API.
+ */
+void sticks3_http_server_set_baud_cbs(sticks3_http_get_baud_cb_t get_cb,
+                                      sticks3_http_set_baud_cb_t set_cb);
 
 #ifdef __cplusplus
 }

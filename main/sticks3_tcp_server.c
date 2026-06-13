@@ -27,9 +27,13 @@ static TaskHandle_t s_server_task = NULL;
 static int s_client_sock = -1;
 static bool s_running = false;
 static bool s_client_connected = false;
+static bool s_diag_mode = false;
 
 static uint8_t s_frame_buf[FRAME_BUF_SIZE];
 static size_t  s_frame_len = 0;
+
+static uint8_t s_diag_echo[512];
+static size_t  s_diag_echo_len = 0;
 
 // Control command callback
 static ctrl_cmd_cb_t s_ctrl_cb = NULL;
@@ -105,10 +109,52 @@ static void send_close_frame(int client) {
     send(client, close_frame, 2, 0);
 }
 
+static bool send_all(int client, const uint8_t *data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        int n = send(client, data + sent, len - sent, 0);
+        if (n <= 0) return false;
+        sent += (size_t)n;
+    }
+    return true;
+}
+
+static void stream_send_all(StreamBufferHandle_t stream, const uint8_t *data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        size_t n = xStreamBufferSend(stream, data + sent, len - sent,
+                                     pdMS_TO_TICKS(100));
+        if (n == 0) {
+            ESP_LOGW(TAG, "tcp_to_uart_buf overflow");
+            break;
+        }
+        sent += n;
+    }
+}
+
+// Send a binary WebSocket frame to client
+static void send_ws_binary(int client, const uint8_t *data, size_t len) {
+    uint8_t hdr[10];
+    int hdr_len;
+    if (len < 126) {
+        hdr[0] = 0x82;
+        hdr[1] = (uint8_t)len;
+        hdr_len = 2;
+    } else {
+        hdr[0] = 0x82;
+        hdr[1] = 126;
+        hdr[2] = (len >> 8) & 0xFF;
+        hdr[3] = len & 0xFF;
+        hdr_len = 4;
+    }
+    if (!send_all(client, hdr, hdr_len)) return;
+    send_all(client, data, len);
+}
+
 static void send_pong_frame(int client, const uint8_t *payload, int payload_len) {
     uint8_t hdr[2] = {0x8A, (uint8_t)payload_len};
-    send(client, hdr, 2, 0);
-    if (payload_len > 0) send(client, payload, payload_len, 0);
+    if (!send_all(client, hdr, 2)) return;
+    if (payload_len > 0) send_all(client, payload, payload_len);
 }
 
 // Returns false if a close frame was received.
@@ -168,7 +214,7 @@ static bool process_frames(void) {
         if (payload_len > 0) {
             uint8_t *data = p + hdr_size;
             // Control protocol: \x01 prefix → dispatch to callback, don't forward to UART
-            if (data[0] == 0x01 && s_ctrl_cb) {
+            if (false && data[0] == 0x01 && s_ctrl_cb) {
                 // Extract command string (skip prefix byte)
                 size_t cmd_len = (size_t)payload_len - 1;
                 char *cmd = malloc(cmd_len + 1);
@@ -201,9 +247,14 @@ static bool process_frames(void) {
                     }
                     free(cmd);
                 }
+            } else if (s_diag_mode) {
+                // Diagnostic mode: store for echo
+                size_t copy = (size_t)payload_len;
+                if (copy > sizeof(s_diag_echo)) copy = sizeof(s_diag_echo);
+                memcpy(s_diag_echo, data, copy);
+                s_diag_echo_len = copy;
             } else if (tcp_to_uart_buf) {
-                xStreamBufferSend(tcp_to_uart_buf, data, (size_t)payload_len,
-                                  pdMS_TO_TICKS(100));
+                stream_send_all(tcp_to_uart_buf, data, (size_t)payload_len);
             }
         }
 
@@ -220,6 +271,7 @@ consume_frame:
 static void ws_task(void *arg) {
     int client = (int)(intptr_t)arg;
     s_frame_len = 0;
+    s_diag_echo_len = 0;
 
     struct timeval tv = { .tv_sec = 0, .tv_usec = 50000 };
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -229,7 +281,15 @@ static void ws_task(void *arg) {
     xStreamBufferReset(uart_to_tcp_buf);
 
     s_client_connected = true;
-    ESP_LOGI(TAG, "ws_task: client connected, buffers cleared");
+    ESP_LOGI(TAG, "ws_task: client connected, diag=%d", s_diag_mode);
+
+    // Diagnostic mode: send test message on connect
+    if (s_diag_mode) {
+        const char *hello = "\r\n=== ESP32 WS DIAG MODE ===\r\n"
+                            "WS link OK. Echo test active.\r\n"
+                            "Send 'DIAG_OFF' control cmd to exit.\r\n\r\n";
+        send_ws_binary(client, (const uint8_t *)hello, strlen(hello));
+    }
 
     uint8_t uart_buf[512];
 
@@ -245,29 +305,19 @@ static void ws_task(void *arg) {
         }
         if (!process_frames()) break;
 
-        // UART → WebSocket
-        size_t len = xStreamBufferReceive(uart_to_tcp_buf, uart_buf,
-                                          sizeof(uart_buf), 0);
-        if (len > 0) {
-            uint8_t hdr[10];
-            int hdr_len;
-            if (len < 126) {
-                hdr[0] = 0x82;
-                hdr[1] = (uint8_t)len;
-                hdr_len = 2;
-            } else {
-                hdr[0] = 0x82;
-                hdr[1] = 126;
-                hdr[2] = (len >> 8) & 0xFF;
-                hdr[3] = len & 0xFF;
-                hdr_len = 4;
-            }
-            if (send(client, hdr, hdr_len, 0) <= 0) break;
-            int sent = 0;
-            while (sent < (int)len) {
-                int n = send(client, uart_buf + sent, len - sent, 0);
-                if (n <= 0) break;
-                sent += n;
+        // Diagnostic mode: echo back received data
+        if (s_diag_mode && s_diag_echo_len > 0) {
+            ESP_LOGI(TAG, "diag echo %d bytes", (int)s_diag_echo_len);
+            send_ws_binary(client, s_diag_echo, s_diag_echo_len);
+            s_diag_echo_len = 0;
+        }
+
+        // UART → WebSocket (normal mode only)
+        if (!s_diag_mode) {
+            size_t len = xStreamBufferReceive(uart_to_tcp_buf, uart_buf,
+                                              sizeof(uart_buf), 0);
+            if (len > 0) {
+                send_ws_binary(client, uart_buf, len);
             }
         }
     }
@@ -402,4 +452,10 @@ bool sticks3_tcp_server_is_client_connected(void) {
 
 void sticks3_tcp_server_set_ctrl_cb(ctrl_cmd_cb_t cb) {
     s_ctrl_cb = cb;
+}
+
+void sticks3_tcp_server_set_diag(bool enabled) {
+    (void)enabled;
+    s_diag_mode = false;
+    ESP_LOGW(TAG, "Diagnostic mode is disabled in terminal bridge mode");
 }

@@ -22,6 +22,9 @@ bool      sticks3_tcp_server_is_client_connected(void);
 // Register control command callback (called by main)
 void      sticks3_tcp_server_set_ctrl_cb(ctrl_cmd_cb_t cb);
 
+// Diagnostic mode: echo test without UART
+void      sticks3_tcp_server_set_diag(bool enabled);
+
 // Stream buffers shared with uart_bridge
 extern StreamBufferHandle_t tcp_to_uart_buf;
 extern StreamBufferHandle_t uart_to_tcp_buf;
