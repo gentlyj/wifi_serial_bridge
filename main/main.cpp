@@ -39,6 +39,8 @@ static TickType_t s_last_activity_tick = 0;
 static TickType_t s_last_fwd_change_tick = 0;
 static uint64_t s_last_rx_bytes = 0;
 static uint64_t s_last_tx_bytes = 0;
+static bool s_charge_state_known = false;
+static bool s_last_charging = false;
 
 #define IDLE_SHUTDOWN_TICKS  pdMS_TO_TICKS(5UL * 60 * 1000)  // 5 minutes
 #define SCREEN_OFF_TICKS     pdMS_TO_TICKS(20UL * 1000)       // 20 seconds
@@ -53,6 +55,17 @@ static const int BAUD_COUNT = sizeof(BAUD_RATES) / sizeof(BAUD_RATES[0]);
 static void IRAM_ATTR button_wake_isr(void *arg) {
     app_event_t ev = APP_EVENT_WAKE_SCREEN;
     xQueueSendFromISR(s_app_event_queue, &ev, NULL);
+}
+
+static void reset_idle_timers(TickType_t now) {
+    s_last_activity_tick = now;
+    s_last_fwd_change_tick = now;
+    sticks3_uart_bridge_get_stats(&s_last_rx_bytes, &s_last_tx_bytes);
+}
+
+static void reset_shutdown_timer(TickType_t now) {
+    s_last_fwd_change_tick = now;
+    sticks3_uart_bridge_get_stats(&s_last_rx_bytes, &s_last_tx_bytes);
 }
 
 /*
@@ -99,6 +112,7 @@ static void enter_waiting_state(bool changed) {
     sticks3_http_server_set_ws_connected(false);
     sticks3_tcp_server_start(TCP_PORT);
     sticks3_http_server_start();
+    reset_idle_timers(xTaskGetTickCount());
     if (changed) sticks3_audio_play_tone(400, 200, 30);
 }
 
@@ -113,6 +127,7 @@ static void enter_active_state(bool changed) {
     sticks3_uart_bridge_start();
     sticks3_ui_set_state(UI_STATE_BRIDGE_ACTIVE);
     sticks3_ui_update_baud(s_baud);
+    reset_idle_timers(xTaskGetTickCount());
     if (changed) sticks3_audio_play_tone(500, 150, 30);
 }
 
@@ -258,7 +273,7 @@ static void screen_wake(void) {
     sticks3_ui_resume();
     s_screen_asleep = false;
     s_wake_suppress_next_click = true;
-    s_last_activity_tick = xTaskGetTickCount();
+    reset_idle_timers(xTaskGetTickCount());
 
     // Restore CPU to full speed
     esp_pm_config_t pm_cfg = {
@@ -296,12 +311,13 @@ static void handle_event(app_event_t event) {
     switch (event) {
         case APP_EVENT_WAKE_SCREEN:
             ESP_LOGI(TAG, "Wake screen event");
+            reset_idle_timers(xTaskGetTickCount());
             screen_wake();
             break;
 
         case APP_EVENT_BTN_A_CLICK:
             ESP_LOGI(TAG, "BtnA click, state=%d", s_current_state);
-            s_last_activity_tick = xTaskGetTickCount();
+            reset_idle_timers(xTaskGetTickCount());
             if (s_wake_suppress_next_click) {
                 s_wake_suppress_next_click = false;
                 ESP_LOGI(TAG, "BtnA click suppressed (wake)");
@@ -315,7 +331,7 @@ static void handle_event(app_event_t event) {
 
         case APP_EVENT_BTN_A_LONG_PRESS:
             ESP_LOGI(TAG, "BtnA long press, state=%d", s_current_state);
-            s_last_activity_tick = xTaskGetTickCount();
+            reset_idle_timers(xTaskGetTickCount());
             if (s_wake_suppress_next_click) {
                 s_wake_suppress_next_click = false;
                 ESP_LOGI(TAG, "BtnA long press suppressed (wake)");
@@ -328,7 +344,7 @@ static void handle_event(app_event_t event) {
 
         case APP_EVENT_BTN_B_LONG_PRESS:
             ESP_LOGI(TAG, "BtnB long press, state=%d", s_current_state);
-            s_last_activity_tick = xTaskGetTickCount();
+            reset_idle_timers(xTaskGetTickCount());
             if (s_wake_suppress_next_click) {
                 s_wake_suppress_next_click = false;
                 ESP_LOGI(TAG, "BtnB long press suppressed (wake)");
@@ -340,7 +356,7 @@ static void handle_event(app_event_t event) {
             break;
 
         case APP_EVENT_BTN_B_CLICK:
-            s_last_activity_tick = xTaskGetTickCount();
+            reset_idle_timers(xTaskGetTickCount());
             if (s_wake_suppress_next_click) {
                 s_wake_suppress_next_click = false;
                 break;
@@ -356,7 +372,7 @@ static void handle_event(app_event_t event) {
         case APP_EVENT_WIFI_CONNECTED:
             ESP_LOGI(TAG, "WiFi connected");
             transition_to(UI_STATE_WIFI_WAITING);
-            s_last_activity_tick = xTaskGetTickCount();
+            reset_idle_timers(xTaskGetTickCount());
             break;
 
         case APP_EVENT_WIFI_FAILED:
@@ -433,6 +449,13 @@ static void idle_monitor_task(void *arg) {
         bool charging = false;
         if (sticks3_power_get_battery(&mv) == ESP_OK) {
             sticks3_power_is_charging(&charging);
+            if (!s_charge_state_known || charging != s_last_charging) {
+                ESP_LOGI(TAG, "Charge state changed: %d -> %d",
+                         s_charge_state_known ? s_last_charging : -1, charging);
+                reset_shutdown_timer(now);
+                s_last_charging = charging;
+                s_charge_state_known = true;
+            }
             if (!charging && mv < LOW_BATTERY_MV) {
                 ESP_LOGW(TAG, "Low battery shutdown: %u mV", mv);
                 prepare_auto_shutdown("LOW BATTERY");
@@ -447,7 +470,9 @@ static void idle_monitor_task(void *arg) {
         }
 
         // 2. Idle forwarding check (only when WiFi connected)
-        if (!charging && s_current_state >= UI_STATE_WIFI_WAITING) {
+        if (charging) {
+            reset_shutdown_timer(now);
+        } else if (s_current_state >= UI_STATE_WIFI_WAITING) {
             uint64_t rx = 0, tx = 0;
             sticks3_uart_bridge_get_stats(&rx, &tx);
             if (rx != s_last_rx_bytes || tx != s_last_tx_bytes) {
