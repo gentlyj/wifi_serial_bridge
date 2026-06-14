@@ -56,6 +56,7 @@ static uint32_t s_baud = 1500000;
 #define COLOR_YELLOW    0xF4C95D
 #define COLOR_CYAN      0x4CC9F0
 #define COLOR_RED       0xF06A6A
+#define COLOR_BTN_B     0x526273
 
 static uint8_t voltage_to_percent(uint16_t mv) {
     if (mv >= 4150) return 100;
@@ -207,13 +208,14 @@ static void create_btn_a_hint(lv_obj_t *scr, const char *label) {
 }
 
 static void create_btn_b_hint(lv_obj_t *scr, const char *label, uint32_t accent) {
+    (void)accent;
     lv_obj_t *bar = create_panel(scr, 128, ACTION_Y, 104, ACTION_H, 0x0D131C);
     lv_obj_set_style_radius(bar, 5, 0);
     lv_obj_set_style_pad_all(bar, 0, 0);
 
     lv_obj_t *key = create_label(bar, "B", FONT_SM, COLOR_BG, 18, LV_TEXT_ALIGN_CENTER);
     lv_obj_set_pos(key, 5, 3);
-    lv_obj_set_style_bg_color(key, lv_color_hex(accent), 0);
+    lv_obj_set_style_bg_color(key, lv_color_hex(COLOR_BTN_B), 0);
     lv_obj_set_style_bg_opa(key, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(key, 9, 0);
 
