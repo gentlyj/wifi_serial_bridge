@@ -8,6 +8,7 @@
 #include "driver/ledc.h"
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
+#include <string.h>
 
 static const char *TAG = "sticks3_display";
 
@@ -37,6 +38,15 @@ static const char *TAG = "sticks3_display";
 #define LCD_PWM_RESOLUTION LEDC_TIMER_8_BIT
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
+static bool s_display_revealed = false;
+
+static void panel_clear_black(void) {
+    static uint16_t black_line[LCD_H_RES];
+    memset(black_line, 0, sizeof(black_line));
+    for (int y = 0; y < LCD_V_RES; y++) {
+        esp_lcd_panel_draw_bitmap(panel_handle, 0, y, LCD_H_RES, y + 1, black_line);
+    }
+}
 
 static void backlight_init(void) {
     // Configure LEDC timer for backlight PWM
@@ -67,6 +77,13 @@ void sticks3_display_set_brightness(uint8_t brightness) {
     ledc_update_duty(LCD_PWM_SPEED, LCD_PWM_CHANNEL);
 }
 
+void sticks3_display_show(void) {
+    if (s_display_revealed) return;
+    sticks3_display_set_brightness(200);
+    s_display_revealed = true;
+    ESP_LOGI(TAG, "Display revealed");
+}
+
 void sticks3_display_sleep(void) {
     sticks3_display_set_brightness(0);
     ESP_LOGI(TAG, "Display sleep (backlight off)");
@@ -74,6 +91,7 @@ void sticks3_display_sleep(void) {
 
 void sticks3_display_wake(void) {
     sticks3_display_set_brightness(200);
+    s_display_revealed = true;
     ESP_LOGI(TAG, "Display wake (backlight restored)");
 }
 
@@ -119,6 +137,7 @@ esp_err_t sticks3_display_init(void) {
     const esp_lcd_panel_dev_config_t panel_cfg = {
         .reset_gpio_num = LCD_RST_PIN,
         .rgb_ele_order  = LCD_RGB_ELEMENT_ORDER_RGB,
+        .data_endian    = LCD_RGB_DATA_ENDIAN_LITTLE,
         .bits_per_pixel = 16,  // RGB565
     };
     ret = esp_lcd_new_panel_st7789(io_handle, &panel_cfg, &panel_handle);
@@ -137,8 +156,9 @@ esp_err_t sticks3_display_init(void) {
     esp_lcd_panel_swap_xy(panel_handle, false);
     esp_lcd_panel_mirror(panel_handle, false, false);
 
-    // 7. Turn on display
+    // 7. Turn on the panel while the backlight is still off, then clear GRAM.
     esp_lcd_panel_disp_on_off(panel_handle, true);
+    panel_clear_black();
 
     // 8. Initialize LVGL
     const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -165,7 +185,8 @@ esp_err_t sticks3_display_init(void) {
         },
         .flags = {
             .buff_dma   = true,
-            .swap_bytes = true,
+            .swap_bytes = false,
+            .sw_rotate  = true,
         },
     };
     lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
@@ -174,9 +195,11 @@ esp_err_t sticks3_display_init(void) {
         return ESP_FAIL;
     }
 
-    // 10. Turn on backlight
-    sticks3_display_set_brightness(200);  // ~80% brightness
+    // Use LVGL software rotation so the ST7789 panel gap stays in the proven portrait setup.
+    lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90);
 
-    ESP_LOGI(TAG, "Display initialized: %dx%d, LVGL ready", LCD_H_RES, LCD_V_RES);
+    // 10. Keep backlight off until the UI creates and flushes the first frame.
+
+    ESP_LOGI(TAG, "Display initialized: %dx%d landscape, LVGL ready", LCD_V_RES, LCD_H_RES);
     return ESP_OK;
 }

@@ -24,6 +24,7 @@ StreamBufferHandle_t tcp_to_uart_buf = NULL;
 StreamBufferHandle_t uart_to_tcp_buf = NULL;
 
 static TaskHandle_t s_server_task = NULL;
+static int s_listen_sock = -1;
 static int s_client_sock = -1;
 static bool s_running = false;
 static bool s_client_connected = false;
@@ -341,6 +342,7 @@ static void server_task(void *arg) {
         vTaskDelete(NULL);
         return;
     }
+    s_listen_sock = listen_sock;
 
     int opt = 1;
     setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -354,6 +356,7 @@ static void server_task(void *arg) {
     if (bind(listen_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         ESP_LOGE(TAG, "Bind failed: errno=%d", errno);
         close(listen_sock);
+        if (s_listen_sock == listen_sock) s_listen_sock = -1;
         s_running = false;
         vTaskDelete(NULL);
         return;
@@ -362,6 +365,7 @@ static void server_task(void *arg) {
     if (listen(listen_sock, 1) < 0) {
         ESP_LOGE(TAG, "Listen failed: errno=%d", errno);
         close(listen_sock);
+        if (s_listen_sock == listen_sock) s_listen_sock = -1;
         s_running = false;
         vTaskDelete(NULL);
         return;
@@ -397,7 +401,10 @@ static void server_task(void *arg) {
         ESP_LOGI(TAG, "Client disconnected, ready for next");
     }
 
-    close(listen_sock);
+    if (s_listen_sock == listen_sock) {
+        close(listen_sock);
+        s_listen_sock = -1;
+    }
     ESP_LOGI(TAG, "server_task: exiting");
     s_server_task = NULL;
     vTaskDelete(NULL);
@@ -418,18 +425,25 @@ esp_err_t sticks3_tcp_server_start(uint16_t port) {
 }
 
 esp_err_t sticks3_tcp_server_stop(void) {
-    if (!s_running) return ESP_OK;
+    if (!s_running && s_listen_sock < 0 && s_client_sock < 0) return ESP_OK;
     s_running = false;
 
     // Stop UART bridge first so tasks stop reading from buffers
     sticks3_uart_bridge_stop();
     vTaskDelay(pdMS_TO_TICKS(200));
 
+    if (s_listen_sock >= 0) {
+        shutdown(s_listen_sock, 0);
+        close(s_listen_sock);
+        s_listen_sock = -1;
+    }
+
     if (s_client_sock >= 0) {
         shutdown(s_client_sock, 0);
         close(s_client_sock);
         s_client_sock = -1;
     }
+    s_client_connected = false;
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     // Now safe to delete buffers
@@ -444,6 +458,17 @@ esp_err_t sticks3_tcp_server_stop(void) {
 
     ESP_LOGI(TAG, "WebSocket server stopped");
     return ESP_OK;
+}
+
+void sticks3_tcp_server_disconnect_client(void) {
+    if (s_client_sock >= 0) {
+        ESP_LOGI(TAG, "Disconnecting WebSocket client");
+        send_close_frame(s_client_sock);
+        shutdown(s_client_sock, 0);
+        close(s_client_sock);
+        s_client_sock = -1;
+    }
+    s_client_connected = false;
 }
 
 bool sticks3_tcp_server_is_client_connected(void) {

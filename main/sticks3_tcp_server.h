@@ -17,6 +17,7 @@ typedef bool (*ctrl_cmd_cb_t)(const char *cmd, char *resp_buf, size_t resp_size)
 
 esp_err_t sticks3_tcp_server_start(uint16_t port);
 esp_err_t sticks3_tcp_server_stop(void);
+void      sticks3_tcp_server_disconnect_client(void);
 bool      sticks3_tcp_server_is_client_connected(void);
 
 // Register control command callback (called by main)

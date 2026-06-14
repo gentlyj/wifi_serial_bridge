@@ -55,70 +55,90 @@ static void IRAM_ATTR button_wake_isr(void *arg) {
     xQueueSendFromISR(s_app_event_queue, &ev, NULL);
 }
 
+/*
+ * State ownership:
+ * DISCONNECTED: no runtime HTTP/WS, no provisioning portal, STA stopped.
+ * PROVISIONING: provisioning HTTP/DNS portal only; runtime HTTP/WS/UART stopped.
+ * WIFI_WAITING: STA connected, runtime HTTP + WS listening, UART bridge stopped.
+ * BRIDGE_ACTIVE: WIFI_WAITING services plus UART bridge forwarding.
+ */
+static void stop_runtime_services(void) {
+    sticks3_uart_bridge_stop();
+    sticks3_tcp_server_stop();
+    sticks3_http_server_stop();
+    sticks3_http_server_set_ws_connected(false);
+    sticks3_ui_update_ws_connected(false);
+}
+
+static void enter_disconnected_state(bool changed) {
+    stop_runtime_services();
+    sticks3_provision_stop();
+    sticks3_wifi_disconnect();
+    sticks3_ui_set_state(UI_STATE_WIFI_DISCONNECTED);
+    if (changed) sticks3_audio_play_tone(200, 300, 30);
+}
+
+static void enter_provisioning_state(bool changed) {
+    stop_runtime_services();
+    sticks3_provision_start();
+    sticks3_ui_set_state(UI_STATE_PROVISIONING);
+    if (changed) sticks3_audio_play_tone(300, 200, 30);
+}
+
+static void enter_waiting_state(bool changed) {
+    sticks3_provision_stop();
+    sticks3_uart_bridge_stop();
+
+    char ip[32];
+    if (sticks3_wifi_get_ip(ip, sizeof(ip)) == ESP_OK) {
+        sticks3_ui_update_ip(ip);
+    }
+    sticks3_ui_set_state(UI_STATE_WIFI_WAITING);
+    sticks3_ui_update_baud(s_baud);
+    sticks3_ui_update_ws_connected(false);
+    sticks3_http_server_set_ws_connected(false);
+    sticks3_tcp_server_start(TCP_PORT);
+    sticks3_http_server_start();
+    if (changed) sticks3_audio_play_tone(400, 200, 30);
+}
+
+static void enter_active_state(bool changed) {
+    sticks3_provision_stop();
+    sticks3_tcp_server_start(TCP_PORT);
+    sticks3_http_server_start();
+    sticks3_uart_bridge_init(UART_TX_PIN, UART_RX_PIN);
+    if (sticks3_uart_bridge_set_baud(s_baud) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply baud on bridge start: %u", (unsigned)s_baud);
+    }
+    sticks3_uart_bridge_start();
+    sticks3_ui_set_state(UI_STATE_BRIDGE_ACTIVE);
+    sticks3_ui_update_baud(s_baud);
+    if (changed) sticks3_audio_play_tone(500, 150, 30);
+}
+
 static void transition_to(ui_state_t new_state) {
-    if (new_state == s_current_state) return;
-
-    ESP_LOGI(TAG, "State %d -> %d", s_current_state, new_state);
-
-    // Exit old state
-    switch (s_current_state) {
-        case UI_STATE_WIFI_DISCONNECTED:
-            break;
-        case UI_STATE_PROVISIONING:
-            sticks3_provision_stop();
-            break;
-        case UI_STATE_WIFI_WAITING:
-            // Only stop TCP server when going to DISCONNECTED or PROVISIONING
-            if (new_state == UI_STATE_WIFI_DISCONNECTED || new_state == UI_STATE_PROVISIONING) {
-                sticks3_tcp_server_stop();
-            }
-            break;
-        case UI_STATE_BRIDGE_ACTIVE:
-            sticks3_uart_bridge_stop();
-            // Only stop TCP server when going to DISCONNECTED or PROVISIONING
-            if (new_state == UI_STATE_WIFI_DISCONNECTED || new_state == UI_STATE_PROVISIONING) {
-                sticks3_tcp_server_stop();
-            }
-            break;
+    bool changed = new_state != s_current_state;
+    if (changed) {
+        ESP_LOGI(TAG, "State %d -> %d", s_current_state, new_state);
+    } else {
+        ESP_LOGI(TAG, "State %d refresh", new_state);
     }
 
-    // Enter new state
     switch (new_state) {
         case UI_STATE_WIFI_DISCONNECTED:
-            sticks3_http_server_stop();
-            sticks3_wifi_disconnect();
-            sticks3_ui_set_state(UI_STATE_WIFI_DISCONNECTED);
-            sticks3_audio_play_tone(200, 300, 30);
+            enter_disconnected_state(changed);
             break;
 
         case UI_STATE_PROVISIONING:
-            sticks3_provision_start();
-            sticks3_ui_set_state(UI_STATE_PROVISIONING);
-            sticks3_audio_play_tone(300, 200, 30);
+            enter_provisioning_state(changed);
             break;
 
-        case UI_STATE_WIFI_WAITING: {
-            char ip[32];
-            if (sticks3_wifi_get_ip(ip, sizeof(ip)) == ESP_OK) {
-                sticks3_ui_update_ip(ip);
-            }
-            sticks3_ui_set_state(UI_STATE_WIFI_WAITING);
-            sticks3_ui_update_baud(s_baud);
-            sticks3_tcp_server_start(TCP_PORT);
-            sticks3_http_server_start();
-            sticks3_audio_play_tone(400, 200, 30);
+        case UI_STATE_WIFI_WAITING:
+            enter_waiting_state(changed);
             break;
-        }
 
         case UI_STATE_BRIDGE_ACTIVE:
-            sticks3_uart_bridge_init(UART_TX_PIN, UART_RX_PIN);
-            if (sticks3_uart_bridge_set_baud(s_baud) != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to apply baud on bridge start: %u", (unsigned)s_baud);
-            }
-            sticks3_uart_bridge_start();
-            sticks3_ui_set_state(UI_STATE_BRIDGE_ACTIVE);
-            sticks3_ui_update_baud(s_baud);
-            sticks3_audio_play_tone(500, 150, 30);
+            enter_active_state(changed);
             break;
     }
 
@@ -175,6 +195,7 @@ static bool http_set_baud(uint32_t baud) {
 
 // Forward declaration
 static void screen_wake(void);
+static void prepare_auto_shutdown(const char *reason);
 
 // Deferred reboot task (allows WS response to be sent first)
 static void deferred_reboot_task(void *arg) {
@@ -248,6 +269,29 @@ static void screen_wake(void) {
     esp_pm_configure(&pm_cfg);
 }
 
+static void prepare_auto_shutdown(const char *reason) {
+    ESP_LOGW(TAG, "Prepare shutdown display: %s", reason ? reason : "auto");
+
+    if (s_screen_asleep) {
+        sticks3_button_disable_wake();
+        sticks3_display_wake();
+        sticks3_ui_resume();
+        s_screen_asleep = false;
+    } else {
+        sticks3_display_wake();
+    }
+
+    esp_pm_config_t pm_cfg = {
+        .max_freq_mhz = 240,
+        .min_freq_mhz = 80,
+        .light_sleep_enable = false,
+    };
+    esp_pm_configure(&pm_cfg);
+
+    sticks3_ui_show_shutdown(reason);
+    s_last_activity_tick = xTaskGetTickCount();
+}
+
 static void handle_event(app_event_t event) {
     switch (event) {
         case APP_EVENT_WAKE_SCREEN:
@@ -290,11 +334,8 @@ static void handle_event(app_event_t event) {
                 ESP_LOGI(TAG, "BtnB long press suppressed (wake)");
                 break;
             }
-            if (s_current_state == UI_STATE_WIFI_DISCONNECTED) {
+            if (s_current_state != UI_STATE_PROVISIONING) {
                 transition_to(UI_STATE_PROVISIONING);
-            } else if (s_current_state == UI_STATE_WIFI_WAITING ||
-                       s_current_state == UI_STATE_BRIDGE_ACTIVE) {
-                transition_to(UI_STATE_WIFI_DISCONNECTED);
             }
             break;
 
@@ -303,6 +344,12 @@ static void handle_event(app_event_t event) {
             if (s_wake_suppress_next_click) {
                 s_wake_suppress_next_click = false;
                 break;
+            }
+            if (s_current_state == UI_STATE_BRIDGE_ACTIVE) {
+                sticks3_tcp_server_disconnect_client();
+                sticks3_ui_update_ws_connected(false);
+                sticks3_http_server_set_ws_connected(false);
+                transition_to(UI_STATE_WIFI_WAITING);
             }
             break;
 
@@ -342,7 +389,12 @@ static void wifi_monitor_task(void *arg) {
     EventGroupHandle_t eg = sticks3_wifi_get_event_group();
     while (true) {
         EventBits_t bits = xEventGroupWaitBits(eg, BIT0 | BIT1,
-                                               pdTRUE, pdFALSE, portMAX_DELAY);
+                                               pdFALSE, pdFALSE, portMAX_DELAY);
+        if (sticks3_provision_is_active()) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        xEventGroupClearBits(eg, bits & (BIT0 | BIT1));
         if (bits & BIT0) {
             app_event_t ev = APP_EVENT_WIFI_CONNECTED;
             xQueueSend(s_app_event_queue, &ev, 0);
@@ -383,6 +435,7 @@ static void idle_monitor_task(void *arg) {
             sticks3_power_is_charging(&charging);
             if (!charging && mv < LOW_BATTERY_MV) {
                 ESP_LOGW(TAG, "Low battery shutdown: %u mV", mv);
+                prepare_auto_shutdown("LOW BATTERY");
                 for (int i = 0; i < 3; i++) {
                     sticks3_audio_play_tone(250, 150, 40);
                     vTaskDelay(pdMS_TO_TICKS(250));
@@ -403,6 +456,7 @@ static void idle_monitor_task(void *arg) {
                 s_last_tx_bytes = tx;
             } else if ((now - s_last_fwd_change_tick) > IDLE_SHUTDOWN_TICKS) {
                 ESP_LOGW(TAG, "Idle shutdown: no data forwarded for 5 min");
+                prepare_auto_shutdown("IDLE TIMEOUT");
                 for (int i = 0; i < 3; i++) {
                     sticks3_audio_play_tone(250, 150, 40);
                     vTaskDelay(pdMS_TO_TICKS(250));

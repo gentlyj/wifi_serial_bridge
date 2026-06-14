@@ -9,11 +9,11 @@ static const char *TAG = "sticks3_button";
 #define BTN_B_PIN  12
 #define BTN_COUNT  2
 
-// BtnA: front strip at bottom-left of screen
-// BtnB: side button → mapped to bottom-right area for LVGL event delivery
+// BtnA: front strip below the display, spanning the screen width.
+// BtnB: side button, mapped to the right-center edge for LVGL event delivery.
 static const lv_point_t btn_points[BTN_COUNT] = {
-    {33, 230},   // BtnA — front button, bottom-left
-    {100, 230},  // BtnB — side button, bottom-right
+    {62, 120},
+    {178, 120},
 };
 
 static lv_indev_t *btn_indev = NULL;

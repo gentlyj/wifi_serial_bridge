@@ -8,13 +8,20 @@
 #include "lwip/sockets.h"
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 
 static const char *TAG = "sticks3_prov";
 
 static TaskHandle_t s_http_task = NULL;
 static TaskHandle_t s_dns_task = NULL;
 static bool s_active = false;
+static bool s_connecting = false;
 static esp_netif_t *s_ap_netif = NULL;
+
+typedef struct {
+    char ssid[64];
+    char pass[128];
+} provision_request_t;
 
 // Captive portal HTML
 static const char PORTAL_HTML[] =
@@ -77,6 +84,59 @@ static bool parse_form_field(const char *body, const char *name, char *out, size
     return true;
 }
 
+static void provision_connect_task(void *arg) {
+    provision_request_t *req = (provision_request_t *)arg;
+    if (!req) {
+        s_connecting = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_mode(APSTA) failed: %s", esp_err_to_name(err));
+        s_connecting = false;
+        free(req);
+        sticks3_provision_start();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    err = sticks3_wifi_connect(req->ssid, req->pass);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sticks3_wifi_connect failed: %s", esp_err_to_name(err));
+        s_connecting = false;
+        free(req);
+        sticks3_provision_start();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    EventGroupHandle_t eg = sticks3_wifi_get_event_group();
+    EventBits_t bits = xEventGroupWaitBits(eg,
+        BIT0 | BIT1, pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
+
+    if (bits & BIT0) {
+        ESP_LOGI(TAG, "Provisioning success");
+        s_active = false;
+        s_connecting = false;
+        err = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "esp_wifi_set_mode(STA) after success failed: %s",
+                     esp_err_to_name(err));
+        }
+    } else {
+        ESP_LOGW(TAG, "Provisioning failed");
+        xEventGroupClearBits(eg, BIT1);
+        s_connecting = false;
+        sticks3_provision_start();
+    }
+
+    free(req);
+    vTaskDelete(NULL);
+}
+
 static void handle_client(int client) {
     char buf[1024];
     int len = recv(client, buf, sizeof(buf) - 1, 0);
@@ -109,30 +169,30 @@ static void handle_client(int client) {
         }
 
         ESP_LOGI(TAG, "Connect: ssid=[%s]", ssid);
+        provision_request_t *req = (provision_request_t *)calloc(1, sizeof(provision_request_t));
+        if (!req) {
+            send_response(client, "500 Internal Server Error", "Out of memory");
+            close(client);
+            return;
+        }
+        strncpy(req->ssid, ssid, sizeof(req->ssid) - 1);
+        strncpy(req->pass, pass, sizeof(req->pass) - 1);
 
         // Send "connecting" response first
         send_response(client, "200 OK",
             "<html><body style=\"text-align:center;padding:40px\">"
             "<h2>Connecting to WiFi...</h2>"
-            "<p>Please wait 15 seconds, then reconnect to your WiFi.</p>"
+            "<p>Please wait 30 seconds, then reconnect to your WiFi.</p>"
             "</body></html>");
         close(client);
 
-        // Now try to connect
-        vTaskDelay(pdMS_TO_TICKS(500));
-        esp_wifi_set_mode(WIFI_MODE_STA);
-        sticks3_wifi_connect(ssid, pass);
-
-        EventGroupHandle_t eg = sticks3_wifi_get_event_group();
-        EventBits_t bits = xEventGroupWaitBits(eg,
-            BIT0 | BIT1, pdTRUE, pdFALSE, pdMS_TO_TICKS(15000));
-
-        if (bits & BIT0) {
-            ESP_LOGI(TAG, "Provisioning success");
-            s_active = false;
-        } else {
-            ESP_LOGW(TAG, "Provisioning failed");
-            esp_wifi_set_mode(WIFI_MODE_APSTA);
+        s_connecting = true;
+        s_active = false;
+        if (xTaskCreate(provision_connect_task, "prov_conn", 4096, req, 5, NULL) != pdPASS) {
+            ESP_LOGE(TAG, "Create provisioning connect task failed");
+            s_connecting = false;
+            free(req);
+            sticks3_provision_start();
         }
         return;
     }
@@ -174,7 +234,8 @@ static void http_server_task(void *arg) {
         socklen_t addr_len = sizeof(client_addr);
         int client = accept(listen_sock, (struct sockaddr *)&client_addr, &addr_len);
         if (client < 0) {
-            if (s_active) ESP_LOGE(TAG, "HTTP accept failed");
+            if (s_active) ESP_LOGE(TAG, "HTTP accept failed, errno=%d", errno);
+            vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
@@ -214,6 +275,8 @@ static void dns_redirect_task(void *arg) {
 
     ESP_LOGI(TAG, "DNS redirect task started");
     uint8_t buf[512];
+    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     while (s_active) {
         struct sockaddr_in client_addr;
@@ -249,6 +312,7 @@ static void dns_redirect_task(void *arg) {
 
     close(sock);
     ESP_LOGI(TAG, "DNS redirect task stopped");
+    s_dns_task = NULL;
     vTaskDelete(NULL);
 }
 
@@ -288,6 +352,7 @@ esp_err_t sticks3_provision_stop(void) {
     if (!s_active) return ESP_OK;
 
     s_active = false;
+    s_connecting = false;
     vTaskDelay(pdMS_TO_TICKS(500));
 
     esp_wifi_set_mode(WIFI_MODE_STA);
@@ -297,5 +362,5 @@ esp_err_t sticks3_provision_stop(void) {
 }
 
 bool sticks3_provision_is_active(void) {
-    return s_active;
+    return s_active || s_connecting;
 }

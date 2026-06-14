@@ -22,6 +22,11 @@ esp_err_t sticks3_display_init(void);
 void sticks3_display_set_brightness(uint8_t brightness);
 
 /**
+ * @brief Reveal the display after the first UI frame is ready
+ */
+void sticks3_display_show(void);
+
+/**
  * @brief Turn off backlight (display sleep)
  */
 void sticks3_display_sleep(void);
